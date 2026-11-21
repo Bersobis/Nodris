@@ -14,5 +14,7 @@ pub use vec3::Vec3;
 /// single change.
 pub type Real = f64;
 
-/// Smallest length treated as non-zero when normalising a direction.
+/// Smallest magnitude the kernel treats as non-zero: a length when normalising
+/// a direction, a determinant when inverting, and a point separation when
+/// checking coincidence.
 pub const EPS: Real = 1.0e-12;

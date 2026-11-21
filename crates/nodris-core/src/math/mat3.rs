@@ -30,10 +30,6 @@ impl Mat3 {
         self.rows[index]
     }
 
-    pub fn row_vec(self, index: usize) -> Vec3 {
-        Vec3::from_array(self.row(index))
-    }
-
     pub fn col(self, index: usize) -> [Real; 3] {
         [
             self.rows[0][index],
@@ -152,7 +148,7 @@ mod tests {
         let m = Mat3::from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
         assert_eq!(m.row(1), [4.0, 5.0, 6.0]);
         assert_eq!(m.col(1), [2.0, 5.0, 8.0]);
-        assert_eq!(m.row_vec(2), Vec3::new(7.0, 8.0, 9.0));
+        assert_eq!(m.row(2), [7.0, 8.0, 9.0]);
     }
 
     #[test]
@@ -192,6 +188,17 @@ mod tests {
     #[test]
     fn empty_matrix_is_singular() {
         assert!(Mat3::ZERO.inverse().is_none());
+    }
+
+    #[test]
+    fn congruence_applies_the_transform_on_both_sides() {
+        // A transform that swaps x and y swaps rows and columns of the matrix.
+        // Worked by hand, so this fails if the receiver and the argument are
+        // ever exchanged.
+        let t = Mat3::from_rows([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
+        let k = Mat3::from_rows([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]);
+        let expected = Mat3::from_rows([[5.0, 4.0, 6.0], [2.0, 1.0, 3.0], [8.0, 7.0, 9.0]]);
+        assert_eq!(t.congruence(&k), expected);
     }
 
     #[test]

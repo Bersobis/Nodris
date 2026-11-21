@@ -34,15 +34,6 @@ impl Vec3 {
         [self.x, self.y, self.z]
     }
 
-    /// One component by axis index: 0 for x, 1 for y, 2 for z.
-    ///
-    /// # Panics
-    ///
-    /// Panics on an index above 2.
-    pub fn component(self, axis: usize) -> Real {
-        self.to_array()[axis]
-    }
-
     pub fn dot(self, other: Self) -> Real {
         self.x * other.x + self.y * other.y + self.z * other.z
     }
@@ -78,10 +69,6 @@ impl Vec3 {
         Some(self / norm)
     }
 
-    pub fn scaled(self, factor: Real) -> Self {
-        self * factor
-    }
-
     pub fn distance(self, other: Self) -> Real {
         (self - other).norm()
     }
@@ -94,16 +81,12 @@ impl Vec3 {
 
     /// Rotate about an arbitrary axis by `angle` radians (Rodrigues' formula).
     ///
-    /// # Panics
-    ///
-    /// Panics when the axis has no direction. Silently rotating by the wrong
-    /// angle would be harder to find than a failed call.
-    pub fn rotated(self, axis: Self, angle: Real) -> Self {
-        let k = axis
-            .normalized()
-            .expect("rotation axis must have a direction");
+    /// Returns `None` when the axis has no direction, the same rule
+    /// [`Vec3::normalized`] applies.
+    pub fn rotated(self, axis: Self, angle: Real) -> Option<Self> {
+        let k = axis.normalized()?;
         let (s, c) = angle.sin_cos();
-        self * c + k.cross(self) * s + k * (k.dot(self) * (1.0 - c))
+        Some(self * c + k.cross(self) * s + k * (k.dot(self) * (1.0 - c)))
     }
 }
 
@@ -154,7 +137,7 @@ impl Index<usize> for Vec3 {
     ///
     /// # Panics
     ///
-    /// Panics on an index above 2, matching [`Vec3::component`].
+    /// Panics on an index above 2.
     fn index(&self, index: usize) -> &Real {
         match index {
             0 => &self.x,
@@ -213,7 +196,7 @@ mod tests {
     #[test]
     fn parallel_vectors_have_no_cross_product() {
         let a = Vec3::new(1.0, 2.0, 3.0);
-        let c = a.cross(a.scaled(2.0));
+        let c = a.cross(a * 2.0);
         assert_eq!(c.norm(), 0.0);
     }
 
@@ -247,7 +230,9 @@ mod tests {
 
     #[test]
     fn rotation_about_z_moves_x_to_y() {
-        let rotated = Vec3::X.rotated(Vec3::Z, std::f64::consts::FRAC_PI_2);
+        let rotated = Vec3::X
+            .rotated(Vec3::Z, std::f64::consts::FRAC_PI_2)
+            .expect("unit axis");
         assert!((rotated - Vec3::Y).norm() < 1.0e-12);
         assert!((rotated.norm() - 1.0).abs() < 1.0e-12);
     }
@@ -255,8 +240,13 @@ mod tests {
     #[test]
     fn rotation_about_the_vector_itself_changes_nothing() {
         let v = Vec3::new(1.0, 2.0, 3.0);
-        let rotated = v.rotated(v, 0.9);
+        let rotated = v.rotated(v, 0.9).expect("non-zero axis");
         assert!((rotated - v).norm() < 1.0e-12);
+    }
+
+    #[test]
+    fn zero_axis_does_not_rotate() {
+        assert!(Vec3::X.rotated(Vec3::ZERO, 1.0).is_none());
     }
 
     #[test]
@@ -264,8 +254,8 @@ mod tests {
         let v = Vec3::new(4.0, 5.0, 6.0);
         assert_eq!(v[0], 4.0);
         assert_eq!(v[2], 6.0);
-        assert_eq!(v.component(1), v[1]);
         let array: [Real; 3] = v.into();
         assert_eq!(Vec3::from(array), v);
+        assert_eq!(v.to_array(), array);
     }
 }
