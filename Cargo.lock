@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "stodola-core"
+name = "nodris-core"
 version = "0.1.0"
