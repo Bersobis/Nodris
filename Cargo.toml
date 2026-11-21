@@ -1,3 +1,15 @@
 [workspace]
 resolver = "2"
 members = ["crates/nodris-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+# Settings for the desktop binary: one codegen unit and thin LTO trade build
+# time for a smaller, faster executable, which is the one users run.
+lto = "thin"
+codegen-units = 1
+panic = "abort"

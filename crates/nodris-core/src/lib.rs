@@ -5,7 +5,12 @@
 //! crate. The command line, the scene and the desktop application are written
 //! against it.
 //!
-//! No modules exist yet. Each one is added with the phase that implements it.
+//! The first module is [`math`]: fixed-size vectors and matrices with the
+//! operations element assembly needs.
 //!
 //! Nodris is a rebuild of Stodola, reconstructed from a plan that numbers its
 //! commits, `P0-02` and so on. Those ids refer to the plan.
+
+pub mod math;
+
+pub use math::{Mat3, Vec3};

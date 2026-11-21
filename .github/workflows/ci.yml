@@ -1,0 +1,33 @@
+name: CI
+
+# One job, one script. The workflow calls scripts/ci.sh rather than repeating
+# its commands, so a green local run and a green pipeline mean the same thing.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml selects the channel and the components.
+      - name: Install the pinned toolchain
+        run: rustup show
+
+      - name: Cache cargo and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run the gate
+        shell: bash
+        run: bash scripts/ci.sh
