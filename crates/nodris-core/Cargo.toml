@@ -1,0 +1,6 @@
+[package]
+name = "stodola-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Structural analysis kernel for Stodola: numerical kernel, model schema, elements and analysis."
