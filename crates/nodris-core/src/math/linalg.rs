@@ -2,14 +2,17 @@
 //! that decide how wide the band has to be.
 //!
 //! The lower triangle is stored row-wise: `A(i, j)` with `i >= j` sits at
-//! `data[i * bw + (i - j)]`, so walking along a row is a contiguous scan.
-//! The upper triangle sits in the later row that owns the symmetric pair.
+//! `data[i * bw + (i - j)]`, so walking along a row is a contiguous scan. The
+//! upper triangle is not stored; `get` reads it from the same slot as its
+//! lower twin.
 
+use super::error::SolveError;
+use super::tolerance::PIVOT;
 use super::Real;
 use std::collections::VecDeque;
 
 /// Symmetric matrix stored by lower-triangle rows in a band of half-width `bw`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct BandedMatrix {
     n: usize,
     bw: usize,
@@ -27,7 +30,7 @@ impl BandedMatrix {
         }
     }
 
-    /// Identity matrix of dimension `n`.
+    /// Identity matrix of dimension `n`, at the narrowest band.
     pub fn identity(n: usize) -> Self {
         let mut m = Self::new(n, 1);
         for i in 0..n {
@@ -37,16 +40,19 @@ impl BandedMatrix {
     }
 
     /// Matrix dimension.
+    #[inline]
     pub fn dim(&self) -> usize {
         self.n
     }
 
     /// Half-bandwidth: entries with `|i - j| < bandwidth` are stored.
+    #[inline]
     pub fn bandwidth(&self) -> usize {
         self.bw
     }
 
     /// Number of coefficient slots, `n * bandwidth`.
+    #[inline]
     pub fn stored(&self) -> usize {
         self.data.len()
     }
@@ -65,6 +71,7 @@ impl BandedMatrix {
     /// build profile: a dropped stiffness contribution would yield plausible
     /// but wrong displacements, so an out-of-band write is refused rather
     /// than silently ignored.
+    #[inline]
     pub fn add(&mut self, i: usize, j: usize, v: Real) {
         assert!(i < self.n && j < self.n, "banded index out of range");
         let (hi, lo) = if i >= j { (i, j) } else { (j, i) };
@@ -77,6 +84,7 @@ impl BandedMatrix {
     }
 
     /// Reads `A(i, j)`, returning zero outside the band.
+    #[inline]
     pub fn get(&self, i: usize, j: usize) -> Real {
         assert!(i < self.n && j < self.n, "banded index out of range");
         let (hi, lo) = if i >= j { (i, j) } else { (j, i) };
@@ -110,8 +118,113 @@ impl BandedMatrix {
         out
     }
 
-    /// Expands the band to a dense row-major matrix for inspection and tests.
-    pub fn to_dense(&self) -> Vec<Vec<Real>> {
+    /// Factors the matrix in place as `A = L·D·Lᵀ`.
+    ///
+    /// The strictly lower triangle is overwritten by `L` (unit diagonal
+    /// implied) and `D` is returned, so the original matrix is gone afterwards.
+    /// Clone it first if the residual or the entries are still needed.
+    ///
+    /// The factorisation is unpivoted, which needs a positive definite matrix.
+    /// A pivot that is negative, non-finite or at or below
+    /// [`PIVOT`](super::tolerance::PIVOT) is refused rather than propagated,
+    /// so a caller never receives NaNs.
+    pub fn factor(&mut self) -> Result<Vec<Real>, SolveError> {
+        let n = self.n;
+        let bw = self.bw;
+        let mut d = vec![0.0; n];
+
+        for i in 0..n {
+            let k0 = (i + 1).saturating_sub(bw);
+            let row = i * bw;
+
+            // Off-diagonals first: row i only needs D and the rows already
+            // finished, so the diagonal can come last.
+            for j in k0..i {
+                let mut t = self.data[row + (i - j)];
+                // k < j and i - k < bw; the second implies the first.
+                for (k, dk) in d[..j].iter().enumerate().skip(k0) {
+                    t -= self.data[row + (i - k)] * self.data[j * bw + (j - k)] * dk;
+                }
+                self.data[row + (i - j)] = t / d[j];
+            }
+
+            let mut s = self.data[row];
+            for (k, dk) in d[..i].iter().enumerate().skip(k0) {
+                let l = self.data[row + (i - k)];
+                s -= l * l * dk;
+            }
+            if !s.is_finite() {
+                return Err(SolveError::NotFinite { equation: i });
+            }
+            if s < 0.0 {
+                return Err(SolveError::NotPositiveDefinite { equation: i });
+            }
+            if s < PIVOT {
+                return Err(SolveError::Singular { equation: i });
+            }
+            d[i] = s;
+        }
+        Ok(d)
+    }
+
+    /// Solves `A·x = b` from a factorisation produced by
+    /// [`BandedMatrix::factor`]. `b` is overwritten with the solution.
+    ///
+    /// # Panics
+    /// Panics when `d` or `b` has a different length from the matrix.
+    pub fn solve(&self, d: &[Real], b: &mut [Real]) {
+        assert_eq!(d.len(), self.n, "factor length must match matrix size");
+        assert_eq!(b.len(), self.n, "rhs length must match matrix size");
+        let n = self.n;
+        let bw = self.bw;
+
+        // Forward: L·y = b.
+        for i in 0..n {
+            let k0 = (i + 1).saturating_sub(bw);
+            let row = i * bw;
+            let mut s = b[i];
+            for (k, bk) in b[..i].iter().enumerate().skip(k0) {
+                s -= self.data[row + (i - k)] * bk;
+            }
+            b[i] = s;
+        }
+        // Diagonal: z = D⁻¹·y.
+        for i in 0..n {
+            b[i] /= d[i];
+        }
+        // Backward: Lᵀ·x = z.
+        for i in (0..n).rev() {
+            let jmax = (i + bw).min(n);
+            let mut s = b[i];
+            for (j, bj) in b.iter().enumerate().take(jmax).skip(i + 1) {
+                s -= self.data[j * bw + (j - i)] * bj;
+            }
+            b[i] = s;
+        }
+    }
+
+    /// Infinity norm of `A·x - b`, the check that a solve actually satisfies
+    /// the system it was given.
+    ///
+    /// Needs an unfactored matrix: after [`BandedMatrix::factor`] the band
+    /// holds `L` and `D`, not `A`.
+    ///
+    /// # Panics
+    /// Panics when `x` or `b` has a different length from the matrix.
+    pub fn residual(&self, x: &[Real], b: &[Real]) -> Real {
+        assert_eq!(x.len(), self.n, "solution length must match matrix size");
+        assert_eq!(b.len(), self.n, "rhs length must match matrix size");
+        let y = self.mul_vec(x);
+        y.iter()
+            .zip(b)
+            .fold(0.0, |worst, (yi, bi)| worst.max((yi - bi).abs()))
+    }
+
+    /// Expands the band to a dense row-major matrix. Test-only: the kernel
+    /// never needs the dense form, and expanding it would defeat the point of
+    /// banded storage.
+    #[cfg(test)]
+    fn to_dense(&self) -> Vec<Vec<Real>> {
         let mut dense = vec![vec![0.0; self.n]; self.n];
         for i in 0..self.n {
             let first = i.saturating_sub(self.bw - 1);
@@ -189,6 +302,8 @@ pub fn bandwidth(elements: &[Vec<usize>]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::super::error::SolveError;
+    use super::super::tolerance::{PIVOT, RESIDUAL};
     use super::{bandwidth, rcm, BandedMatrix, Real};
 
     fn next(seed: &mut u64) -> Real {
@@ -215,6 +330,33 @@ mod tests {
             .iter()
             .map(|row| row.iter().zip(rhs).map(|(a, b)| a * b).sum())
             .collect()
+    }
+
+    /// Gaussian elimination with partial pivoting, on the dense oracle only.
+    /// The banded solver under test never uses it.
+    fn dense_solve(dense: &[Vec<Real>], b: &[Real]) -> Vec<Real> {
+        let n = b.len();
+        let mut a: Vec<Vec<Real>> = dense.to_vec();
+        let mut x = b.to_vec();
+        for col in 0..n {
+            let pivot = (col..n)
+                .max_by(|&i, &j| a[i][col].abs().partial_cmp(&a[j][col].abs()).unwrap())
+                .unwrap();
+            a.swap(col, pivot);
+            x.swap(col, pivot);
+            for row in col + 1..n {
+                let f = a[row][col] / a[col][col];
+                for k in col..n {
+                    a[row][k] -= f * a[col][k];
+                }
+                x[row] -= f * x[col];
+            }
+        }
+        for row in (0..n).rev() {
+            let s: Real = (row + 1..n).map(|k| a[row][k] * x[k]).sum();
+            x[row] = (x[row] - s) / a[row][row];
+        }
+        x
     }
 
     #[test]
@@ -354,6 +496,117 @@ mod tests {
         assert_eq!(m.get(3, 5), 1.0);
         // The mirror entry is reported as well.
         assert_eq!(m.get(5, 3), 1.0);
+    }
+
+    #[test]
+    fn factor_and_solve_reproduce_the_closed_form_3x3_system() {
+        // A = [[4, 1, 0], [1, 3, 1], [0, 1, 2]] with x = [1, 2, -1] gives
+        // b = [6, 6, 0], solved in closed form by the tridiagonal algorithm.
+        let mut m = BandedMatrix::new(3, 2);
+        m.add(0, 0, 4.0);
+        m.add(1, 0, 1.0);
+        m.add(1, 1, 3.0);
+        m.add(2, 1, 1.0);
+        m.add(2, 2, 2.0);
+
+        let mut factored = m.clone();
+        let d = factored.factor().expect("SPD system must factor");
+        assert!(d.iter().all(|&di| di > 0.0));
+
+        let mut x = vec![6.0, 6.0, 0.0];
+        factored.solve(&d, &mut x);
+        let expected = [1.0, 2.0, -1.0];
+        for (got, want) in x.iter().zip(&expected) {
+            assert!((got - want).abs() < 1.0e-12, "got {got}, want {want}");
+        }
+        // The residual is measured on the unfactored matrix.
+        assert!(m.residual(&x, &[6.0, 6.0, 0.0]) < RESIDUAL);
+    }
+
+    #[test]
+    fn solve_agrees_with_the_dense_oracle_on_seeded_spd_systems() {
+        for bw in 1..=3 {
+            let m = seeded_spd(20, bw);
+            let dense = m.to_dense();
+            let mut seed = 7;
+            let x_true: Vec<Real> = (0..20).map(|_| 2.0 * next(&mut seed) - 1.0).collect();
+            let b = dense_mul(&dense, &x_true);
+
+            let mut factored = m.clone();
+            let d = factored.factor().expect("seeded system is SPD");
+            let mut x = b.clone();
+            factored.solve(&d, &mut x);
+
+            let oracle = dense_solve(&dense, &b);
+            for (got, want) in x.iter().zip(&oracle) {
+                assert!(
+                    (got - want).abs() < 1.0e-10,
+                    "bandwidth {bw}: got {got}, oracle {want}"
+                );
+            }
+            for (got, want) in x.iter().zip(&x_true) {
+                assert!(
+                    (got - want).abs() < 1.0e-10,
+                    "bandwidth {bw}: {got} vs {want}"
+                );
+            }
+            assert!(m.residual(&x, &b) < RESIDUAL, "bandwidth {bw}");
+        }
+    }
+
+    #[test]
+    fn residual_is_zero_for_an_exact_solution_and_large_for_a_wrong_one() {
+        let m = seeded_spd(8, 3);
+        let x: Vec<Real> = (0..8).map(|i| 0.5 + 0.1 * i as Real).collect();
+        let b = m.mul_vec(&x);
+        assert!(m.residual(&x, &b) < PIVOT);
+        let mut wrong = x.clone();
+        wrong[3] += 1.0;
+        assert!(m.residual(&wrong, &b) > 1.0);
+    }
+
+    #[test]
+    fn zero_pivot_is_reported_as_singular() {
+        let mut m = BandedMatrix::new(3, 2);
+        m.add(0, 0, 1.0);
+        m.add(1, 1, 0.0);
+        m.add(2, 2, 1.0);
+        assert_eq!(m.factor(), Err(SolveError::Singular { equation: 1 }));
+    }
+
+    #[test]
+    fn negative_pivot_is_reported_as_not_positive_definite() {
+        let mut m = BandedMatrix::new(2, 1);
+        m.add(0, 0, 1.0);
+        m.add(1, 1, -2.0);
+        assert_eq!(
+            m.factor(),
+            Err(SolveError::NotPositiveDefinite { equation: 1 })
+        );
+    }
+
+    #[test]
+    fn non_finite_pivot_is_reported_as_not_finite() {
+        let mut m = BandedMatrix::new(2, 1);
+        m.add(0, 0, Real::NAN);
+        m.add(1, 1, 1.0);
+        assert_eq!(m.factor(), Err(SolveError::NotFinite { equation: 0 }));
+    }
+
+    #[test]
+    fn pivot_below_tolerance_is_rejected_before_it_poisons_the_solve() {
+        let mut m = BandedMatrix::new(2, 1);
+        m.add(0, 0, 1.0);
+        m.add(1, 1, PIVOT / 2.0);
+        assert_eq!(m.factor(), Err(SolveError::Singular { equation: 1 }));
+    }
+
+    #[test]
+    #[should_panic(expected = "rhs length")]
+    fn solve_rejects_a_mismatched_rhs() {
+        let m = BandedMatrix::identity(3);
+        let d = vec![1.0; 3];
+        m.solve(&d, &mut [1.0, 2.0]);
     }
 
     #[test]

@@ -55,7 +55,7 @@ impl Mat3 {
         )
     }
 
-    pub fn mul_mat(self, other: Self) -> Self {
+    pub fn mul(&self, other: &Self) -> Self {
         let mut rows = [[0.0; 3]; 3];
         for (i, row) in rows.iter_mut().enumerate() {
             for (j, value) in row.iter_mut().enumerate() {
@@ -73,7 +73,7 @@ impl Mat3 {
     /// `axes.congruence(&block)` exactly as the Stodola formulations do, and a
     /// ported call keeps its shape.
     pub fn congruence(&self, other: &Self) -> Self {
-        self.transpose().mul_mat(*other).mul_mat(*self)
+        self.transpose().mul(other).mul(self)
     }
 
     pub fn det(self) -> Real {
@@ -155,21 +155,18 @@ mod tests {
     fn transpose_of_a_product_reverses_the_factors() {
         let a = rotation_z(0.3);
         let b = Mat3::from_rows([[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]]);
-        assert_eq!(
-            a.mul_mat(b).transpose(),
-            b.transpose().mul_mat(a.transpose())
-        );
+        assert_eq!(a.mul(&b).transpose(), b.transpose().mul(&a.transpose()));
     }
 
     #[test]
     fn inverse_undoes_the_transform() {
-        let m = rotation_z(0.7).mul_mat(Mat3::from_rows([
+        let m = rotation_z(0.7).mul(&Mat3::from_rows([
             [2.0, 0.0, 0.0],
             [0.0, 3.0, 0.0],
             [0.0, 0.0, 4.0],
         ]));
         let inverse = m.inverse().expect("invertible");
-        let product = m.mul_mat(inverse);
+        let product = m.mul(&inverse);
         for i in 0..3 {
             for j in 0..3 {
                 let expected = if i == j { 1.0 } else { 0.0 };
@@ -205,7 +202,7 @@ mod tests {
     fn congruence_matches_the_explicit_product() {
         let k = Mat3::from_rows([[2.0, 1.0, 0.0], [1.0, 3.0, 0.5], [0.0, 0.5, 4.0]]);
         let t = rotation_z(-0.4);
-        let expected = t.transpose().mul_mat(k).mul_mat(t);
+        let expected = t.transpose().mul(&k).mul(&t);
         assert_eq!(t.congruence(&k), expected);
         // A rotation preserves the determinant of the transformed matrix.
         assert!((t.congruence(&k).det() - k.det()).abs() < 1.0e-12);
