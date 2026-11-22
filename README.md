@@ -1,7 +1,7 @@
 # Nodris
 
 Nodris is a structural analysis program for frames, trusses, shells and
-isogeometric patches. It is a rebuild of Stodola. The work is split into phases, and ids such as
+isogeometric patches. It is a rebuild of my first vibe-coded attempt caled Stodola. The work is split into phases, and ids such as
 `P0-02` label them.
 
 Models are stored as JSON. The solver is a library crate; a command line and a
