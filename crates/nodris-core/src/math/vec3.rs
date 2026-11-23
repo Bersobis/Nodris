@@ -2,7 +2,8 @@
 
 use core::ops::{Add, Div, Index, Mul, Neg, Sub};
 
-use super::{Real, EPS};
+use super::tolerance::LENGTH_EPS;
+use super::Real;
 
 /// A point or direction in three dimensions.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -56,34 +57,53 @@ impl Vec3 {
         self.norm_squared().sqrt()
     }
 
+    /// True when every component is finite.
+    pub fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
+    }
+
     /// Unit vector in the same direction.
     ///
     /// Returns `None` for a zero-length vector or one with a non-finite
     /// component: both have no direction to hand back, and a caller that
     /// silently receives a NaN axis produces wrong element matrices.
+    ///
+    /// The norm is taken after scaling by the largest component, so a vector
+    /// whose components are all very small or very large still normalises.
     pub fn normalized(self) -> Option<Self> {
-        let norm = self.norm();
-        if !norm.is_finite() || norm <= EPS {
+        if !self.is_finite() {
             return None;
         }
-        Some(self / norm)
+        let scale = self.x.abs().max(self.y.abs()).max(self.z.abs());
+        if scale == 0.0 {
+            return None;
+        }
+        let scaled = self / scale;
+        Some(scaled / scaled.norm())
     }
 
     pub fn distance(self, other: Self) -> Real {
         (self - other).norm()
     }
 
-    /// True when the vector is shorter than [`EPS`], the length at which the
-    /// kernel treats two points as coincident.
+    /// True when the vector is shorter than [`LENGTH_EPS`] in the model's
+    /// coordinate units, the length at which the kernel treats two points as
+    /// coincident. For direction work prefer [`Vec3::normalized`], which has
+    /// no absolute length threshold.
     pub fn is_zero(self) -> bool {
-        self.norm() < EPS
+        self.norm() < LENGTH_EPS
     }
 
     /// Rotate about an arbitrary axis by `angle` radians (Rodrigues' formula).
     ///
-    /// Returns `None` when the axis has no direction, the same rule
-    /// [`Vec3::normalized`] applies.
+    /// Returns `None` when the axis has no direction, when `self` has a
+    /// non-finite component, or when `angle` is not finite. An unchecked angle
+    /// would put NaN straight into an element's local axes without any solver
+    /// error path seeing it.
     pub fn rotated(self, axis: Self, angle: Real) -> Option<Self> {
+        if !self.is_finite() || !angle.is_finite() {
+            return None;
+        }
         let k = axis.normalized()?;
         let (s, c) = angle.sin_cos();
         Some(self * c + k.cross(self) * s + k * (k.dot(self) * (1.0 - c)))
@@ -214,6 +234,25 @@ mod tests {
     }
 
     #[test]
+    fn tiny_and_large_vectors_still_normalise() {
+        // Squaring components of this size would underflow or overflow before
+        // the norm could be taken; scaling by the largest component avoids it.
+        for &factor in &[1.0e-200, 1.0e200] {
+            let unit = Vec3::new(3.0 * factor, 0.0, 4.0 * factor)
+                .normalized()
+                .expect("finite non-zero vector");
+            assert!((unit - Vec3::new(0.6, 0.0, 0.8)).norm() < 1.0e-12);
+        }
+    }
+
+    #[test]
+    fn is_finite_rejects_nan_and_infinity() {
+        assert!(Vec3::new(1.0, -2.0, 3.0).is_finite());
+        assert!(!Vec3::new(1.0, f64::NAN, 3.0).is_finite());
+        assert!(!Vec3::new(f64::INFINITY, 0.0, 0.0).is_finite());
+    }
+
+    #[test]
     fn distance_is_the_length_between_points() {
         let a = Vec3::new(1.0, 2.0, 2.0);
         let b = Vec3::new(1.0, 2.0, 5.0);
@@ -247,6 +286,14 @@ mod tests {
     #[test]
     fn zero_axis_does_not_rotate() {
         assert!(Vec3::X.rotated(Vec3::ZERO, 1.0).is_none());
+    }
+
+    #[test]
+    fn non_finite_angle_or_vector_does_not_rotate() {
+        assert!(Vec3::X.rotated(Vec3::Z, f64::NAN).is_none());
+        assert!(Vec3::X.rotated(Vec3::Z, f64::INFINITY).is_none());
+        let nan_vector = Vec3::new(f64::NAN, 0.0, 0.0);
+        assert!(nan_vector.rotated(Vec3::Z, 0.5).is_none());
     }
 
     #[test]

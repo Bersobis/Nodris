@@ -8,21 +8,19 @@
 //! pulled from a linear-algebra crate.
 
 pub mod error;
+pub mod index;
 pub mod linalg;
 mod mat3;
 pub mod tolerance;
 mod vec3;
 
 pub use error::SolveError;
-pub use linalg::BandedMatrix;
+pub use index::{NewIndex, OldIndex, Permutation};
+pub use linalg::{renumber, BandedMatrix, Factored};
 pub use mat3::Mat3;
 pub use vec3::Vec3;
 
-/// Analysis real. One name for the type, so switching precision later is a
-/// single change.
+/// Analysis real. One name for the type, but not a free switch: the tolerances
+/// in [`tolerance`] and the seeded test generator in [`linalg`] are tuned for
+/// `f64` and have to be reviewed if this changes.
 pub type Real = f64;
-
-/// Smallest magnitude the kernel treats as non-zero: a length when normalising
-/// a direction, a determinant when inverting, and a point separation when
-/// checking coincidence.
-pub const EPS: Real = 1.0e-12;

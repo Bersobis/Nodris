@@ -1,6 +1,7 @@
 //! Three-by-three matrix used for local axes and element transformations.
 
-use super::{Real, Vec3, EPS};
+use super::tolerance::DET_RELATIVE;
+use super::{Real, Vec3};
 
 /// A row-major 3x3 matrix.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,11 +87,20 @@ impl Mat3 {
     /// Inverse, or `None` when the matrix is singular or not finite.
     ///
     /// Uses the adjugate, which is exact for the 3x3 case and needs no
-    /// pivoting. A determinant at or below [`EPS`] is rejected rather than
-    /// divided by, because the resulting entries would be meaningless.
+    /// pivoting. The determinant is compared with [`DET_RELATIVE`] times the
+    /// cube of the largest entry, so the verdict does not change when the whole
+    /// matrix is scaled. A zero matrix has a zero scale and is rejected too.
     pub fn inverse(self) -> Option<Self> {
         let det = self.det();
-        if !det.is_finite() || det.abs() <= EPS {
+        let scale: Real = self
+            .rows
+            .iter()
+            .flatten()
+            .fold(0.0, |largest, &value| largest.max(value.abs()));
+        if !det.is_finite() || !scale.is_finite() {
+            return None;
+        }
+        if det.abs() <= DET_RELATIVE * scale.powi(3) {
             return None;
         }
         let r = self.rows;
@@ -167,6 +177,24 @@ mod tests {
         ]));
         let inverse = m.inverse().expect("invertible");
         let product = m.mul(&inverse);
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = if i == j { 1.0 } else { 0.0 };
+                assert!((product.row(i)[j] - expected).abs() < 1.0e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn a_uniformly_scaled_matrix_stays_invertible() {
+        // A determinant of 1e-15 used to be rejected by an absolute threshold.
+        // Inverting a matrix scaled down by 1e-5 must give exactly the inverse
+        // of the original, scaled back up by 1e5.
+        let base = Mat3::from_rows([[2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]]);
+        let factor = 1.0e-5;
+        let scaled = Mat3::from_rows(base.rows.map(|row| row.map(|value| value * factor)));
+        let inverse = scaled.inverse().expect("scaled matrix is invertible");
+        let product = scaled.mul(&inverse);
         for i in 0..3 {
             for j in 0..3 {
                 let expected = if i == j { 1.0 } else { 0.0 };

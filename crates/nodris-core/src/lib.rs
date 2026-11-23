@@ -12,4 +12,6 @@
 
 pub mod math;
 
-pub use math::{BandedMatrix, Mat3, Vec3};
+pub use math::{
+    renumber, BandedMatrix, Factored, Mat3, NewIndex, OldIndex, Permutation, SolveError, Vec3,
+};
