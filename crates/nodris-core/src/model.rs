@@ -1,10 +1,12 @@
 //! Neutral model entities with stable ids.
 //!
 //! A model holds what an editor can change: nodes, materials, sections,
-//! members, areas, patches, load cases, loads, combinations and supports. None
-//! of these is an analysis element yet; elements are derived later from the same
-//! objects. Ids are `u32` values owned by the document, so a selection or a
-//! reference survives a reorder of the vectors.
+//! members, areas, patches, load cases, loads, combinations and supports.
+//! [`Model::validate`] checks blocking structure; [`Model::validate_issues`]
+//! adds object references, severity and orphan warnings. None of these is an
+//! analysis element yet; elements are derived later from the same objects.
+//! Ids are `u32` values owned by the document, so a selection or a reference
+//! survives a reorder of the vectors.
 //!
 //! Coordinates and section properties are stored in SI. A section table that
 //! quotes mm, mm², mm⁴ or mm⁶ crosses [`crate::units`] once in `Section::from_tables`
@@ -649,6 +651,146 @@ impl Support {
     }
 }
 
+/// The kind of model object a validation issue points at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjectKind {
+    /// The model as a whole, with no single owning object.
+    Model,
+    /// A node.
+    Node,
+    /// A material.
+    Material,
+    /// A section.
+    Section,
+    /// A member.
+    Member,
+    /// An area.
+    Area,
+    /// A spline patch.
+    Patch,
+    /// A load case.
+    LoadCase,
+    /// A load combination.
+    Combination,
+    /// A named support definition.
+    SupportDefinition,
+}
+
+impl ObjectKind {
+    /// Stable spelling used by reports and the CLI.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ObjectKind::Model => "model",
+            ObjectKind::Node => "node",
+            ObjectKind::Material => "material",
+            ObjectKind::Section => "section",
+            ObjectKind::Member => "member",
+            ObjectKind::Area => "area",
+            ObjectKind::Patch => "patch",
+            ObjectKind::LoadCase => "load_case",
+            ObjectKind::Combination => "combination",
+            ObjectKind::SupportDefinition => "support_definition",
+        }
+    }
+
+    /// Parses a report spelling, case-insensitively.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "model" => Some(ObjectKind::Model),
+            "node" => Some(ObjectKind::Node),
+            "material" => Some(ObjectKind::Material),
+            "section" => Some(ObjectKind::Section),
+            "member" => Some(ObjectKind::Member),
+            "area" => Some(ObjectKind::Area),
+            "patch" => Some(ObjectKind::Patch),
+            "load_case" => Some(ObjectKind::LoadCase),
+            "combination" => Some(ObjectKind::Combination),
+            "support_definition" => Some(ObjectKind::SupportDefinition),
+            _ => None,
+        }
+    }
+}
+
+/// A stable reference to the object responsible for an issue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObjectRef {
+    /// Kind of object.
+    pub kind: ObjectKind,
+    /// Document id of the object, or `None` for a model-wide issue.
+    pub id: Option<u32>,
+}
+
+impl ObjectRef {
+    /// Points at one object by kind and document id.
+    pub const fn new(kind: ObjectKind, id: u32) -> Self {
+        Self { kind, id: Some(id) }
+    }
+
+    /// Points at the model as a whole.
+    pub const fn model() -> Self {
+        Self {
+            kind: ObjectKind::Model,
+            id: None,
+        }
+    }
+}
+
+/// Whether a validation issue blocks analysis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    /// The model cannot be analysed until this is fixed.
+    Blocking,
+    /// The model can be analysed, but the object deserves attention.
+    Warning,
+}
+
+impl Severity {
+    /// Stable spelling used by reports and the CLI.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Severity::Blocking => "blocking",
+            Severity::Warning => "warning",
+        }
+    }
+
+    /// True when analysis must stop.
+    pub const fn is_blocking(self) -> bool {
+        matches!(self, Severity::Blocking)
+    }
+}
+
+/// One machine-readable validation result.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidationIssue {
+    /// Object the issue belongs to.
+    pub object: ObjectRef,
+    /// Whether the issue blocks analysis.
+    pub severity: Severity,
+    /// Human-readable explanation.
+    pub message: String,
+}
+
+impl ValidationIssue {
+    /// Creates an issue with an explicit severity.
+    pub fn new(object: ObjectRef, severity: Severity, message: impl Into<String>) -> Self {
+        Self {
+            object,
+            severity,
+            message: message.into(),
+        }
+    }
+
+    /// Creates a blocking issue.
+    pub fn blocking(object: ObjectRef, message: impl Into<String>) -> Self {
+        Self::new(object, Severity::Blocking, message)
+    }
+
+    /// Creates a warning issue.
+    pub fn warning(object: ObjectRef, message: impl Into<String>) -> Self {
+        Self::new(object, Severity::Warning, message)
+    }
+}
+
 fn check_knots(
     patch: PatchId,
     degree: u8,
@@ -1212,6 +1354,14 @@ impl Model {
         Ok(())
     }
 
+    /// Checks the model's structural rules.
+    ///
+    /// This is the blocking contract. Non-blocking observations live in
+    /// [`Model::validate_issues`].
+    pub fn validate(&self) -> Result<(), ModelError> {
+        self.validate_references()
+    }
+
     /// Checks that every member references nodes and a section in the model.
     pub fn validate_references(&self) -> Result<(), ModelError> {
         let index = self.index();
@@ -1337,6 +1487,49 @@ impl Model {
             }
         }
         Ok(())
+    }
+
+    /// Returns blocking errors and non-blocking observations as one list.
+    ///
+    /// Structural errors come first. If any exist, warnings are not computed
+    /// because their reference sets are not trustworthy yet.
+    pub fn validate_issues(&self) -> Vec<ValidationIssue> {
+        if let Err(error) = self.validate() {
+            return vec![error.to_issue()];
+        }
+
+        let mut referenced: Vec<NodeId> = Vec::new();
+        for member in &self.members {
+            referenced.push(member.start);
+            referenced.push(member.end);
+        }
+        for area in &self.areas {
+            referenced.extend(area.nodes);
+        }
+        for patch in &self.patches {
+            for row in &patch.control_net {
+                referenced.extend(row.iter().copied());
+            }
+        }
+        for support in &self.supports {
+            referenced.push(support.node);
+        }
+        for load in &self.loads {
+            if let Load::Nodal { load, .. } = load {
+                referenced.push(load.node);
+            }
+        }
+
+        let mut issues = Vec::new();
+        for node in &self.nodes {
+            if !referenced.contains(&node.id) {
+                issues.push(ValidationIssue::warning(
+                    ObjectRef::new(ObjectKind::Node, node.id.get()),
+                    "orphan node is not used by any object",
+                ));
+            }
+        }
+        issues
     }
 
     /// Builds the id-to-position lookup for the current contents.
@@ -1581,6 +1774,67 @@ impl fmt::Display for ModelError {
 }
 
 impl std::error::Error for ModelError {}
+
+impl ModelError {
+    /// Converts a blocking error into the shared issue contract.
+    pub fn to_issue(&self) -> ValidationIssue {
+        let object = match self {
+            ModelError::DuplicateNode { id } => ObjectRef::new(ObjectKind::Node, id.get()),
+            ModelError::DuplicateMaterial { id } => ObjectRef::new(ObjectKind::Material, id.get()),
+            ModelError::DuplicateSection { id } => ObjectRef::new(ObjectKind::Section, id.get()),
+            ModelError::DuplicateMember { id } => ObjectRef::new(ObjectKind::Member, id.get()),
+            ModelError::UnknownNode { member, .. } => {
+                ObjectRef::new(ObjectKind::Member, member.get())
+            }
+            ModelError::UnknownSection { member, .. } => {
+                ObjectRef::new(ObjectKind::Member, member.get())
+            }
+            ModelError::DuplicateArea { id } => ObjectRef::new(ObjectKind::Area, id.get()),
+            ModelError::DuplicatePatch { id } => ObjectRef::new(ObjectKind::Patch, id.get()),
+            ModelError::UnknownAreaNode { area, .. } => {
+                ObjectRef::new(ObjectKind::Area, area.get())
+            }
+            ModelError::UnknownPatchNode { patch, .. } => {
+                ObjectRef::new(ObjectKind::Patch, patch.get())
+            }
+            ModelError::PatchNetShape { patch }
+            | ModelError::PatchKnotCount { patch, .. }
+            | ModelError::PatchKnotsInvalid { patch, .. }
+            | ModelError::PatchKnotsNotClamped { patch, .. }
+            | ModelError::PatchDegree { patch, .. } => {
+                ObjectRef::new(ObjectKind::Patch, patch.get())
+            }
+            ModelError::DuplicateLoadCase { id } => ObjectRef::new(ObjectKind::LoadCase, id.get()),
+            ModelError::DuplicateCombination { id } => {
+                ObjectRef::new(ObjectKind::Combination, id.get())
+            }
+            ModelError::UnknownLoadCase { case }
+            | ModelError::UnknownLoadNode { case, .. }
+            | ModelError::UnknownLoadMember { case, .. }
+            | ModelError::UnknownLoadArea { case, .. }
+            | ModelError::UnknownLoadPatch { case, .. }
+            | ModelError::NonFiniteLoad { case } => {
+                ObjectRef::new(ObjectKind::LoadCase, case.get())
+            }
+            ModelError::UnknownCombinationCase { combination, .. }
+            | ModelError::NonFiniteCombinationFactor { combination, .. }
+            | ModelError::DuplicateCombinationCase { combination, .. } => {
+                ObjectRef::new(ObjectKind::Combination, combination.get())
+            }
+            ModelError::DuplicateSupportDefinition { id }
+            | ModelError::UnknownSupportDefinition { id } => {
+                ObjectRef::new(ObjectKind::SupportDefinition, id.get())
+            }
+            ModelError::UnknownSupportNode { support } => {
+                ObjectRef::new(ObjectKind::Node, support.get())
+            }
+            ModelError::MultiClaimedNode { node, .. } => {
+                ObjectRef::new(ObjectKind::Node, node.get())
+            }
+        };
+        ValidationIssue::blocking(object, self.to_string())
+    }
+}
 
 /// Maps stable ids to positions in a [`Model`].
 ///
@@ -2452,5 +2706,77 @@ mod tests {
                 id: SupportDefinitionId::new(14)
             })
         );
+    }
+
+    #[test]
+    fn object_kind_spellings_round_trip() {
+        for kind in [
+            ObjectKind::Model,
+            ObjectKind::Node,
+            ObjectKind::Material,
+            ObjectKind::Section,
+            ObjectKind::Member,
+            ObjectKind::Area,
+            ObjectKind::Patch,
+            ObjectKind::LoadCase,
+            ObjectKind::Combination,
+            ObjectKind::SupportDefinition,
+        ] {
+            assert_eq!(ObjectKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(ObjectKind::parse(" NODE "), Some(ObjectKind::Node));
+        assert_eq!(ObjectKind::parse("load"), None);
+    }
+
+    #[test]
+    fn severity_names_its_contract() {
+        assert_eq!(Severity::Blocking.as_str(), "blocking");
+        assert_eq!(Severity::Warning.as_str(), "warning");
+        assert!(Severity::Blocking.is_blocking());
+        assert!(!Severity::Warning.is_blocking());
+    }
+
+    #[test]
+    fn model_ref_has_no_object_id() {
+        assert_eq!(
+            ObjectRef::model(),
+            ObjectRef {
+                kind: ObjectKind::Model,
+                id: None,
+            }
+        );
+    }
+
+    #[test]
+    fn blocking_error_maps_to_an_issue() {
+        let issue = ModelError::UnknownNode {
+            member: MemberId::new(4),
+            node: NodeId::new(99),
+        }
+        .to_issue();
+        assert_eq!(issue.object, ObjectRef::new(ObjectKind::Member, 4));
+        assert_eq!(issue.severity, Severity::Blocking);
+        assert!(issue.message.contains("member 4"));
+    }
+
+    #[test]
+    fn full_model_validates_without_issues() {
+        let model = full_model();
+        assert_eq!(model.validate(), Ok(()));
+        assert!(model.validate_issues().is_empty());
+    }
+
+    #[test]
+    fn orphan_node_reports_a_warning_with_its_id() {
+        let issues = with_member().validate_issues();
+        assert_eq!(issues.len(), 2);
+        assert!(issues.iter().any(|issue| {
+            issue.object == ObjectRef::new(ObjectKind::Node, 11)
+                && issue.severity == Severity::Warning
+                && issue.message.contains("orphan")
+        }));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.object == ObjectRef::new(ObjectKind::Node, 12)));
     }
 }

@@ -26,6 +26,7 @@ pub use math::{
 pub use model::{
     Area, AreaId, AreaKind, AreaLoad, Combination, CombinationId, ElementKind, Load, LoadCase,
     LoadCaseId, Material, MaterialId, Member, MemberId, Model, ModelError, ModelIndex, NodalLoad,
-    Node, NodeId, PatchDirection, PatchId, PatchLoad, Restraints, Section, SectionId, SplinePatch,
-    Support, SupportDefinition, SupportDefinitionId,
+    Node, NodeId, ObjectKind, ObjectRef, PatchDirection, PatchId, PatchLoad, Restraints, Section,
+    SectionId, Severity, SplinePatch, Support, SupportDefinition, SupportDefinitionId,
+    ValidationIssue,
 };
