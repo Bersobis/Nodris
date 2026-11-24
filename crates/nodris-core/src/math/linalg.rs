@@ -209,7 +209,7 @@ impl BandedMatrix {
     }
 
     /// Infinity norm of `A·x - b`, relative to `‖b‖∞` when `b` is non-zero and
-    /// absolute otherwise. Compare with [`RESIDUAL`](super::tolerance::RESIDUAL).
+    /// absolute otherwise. Compare with [`RESIDUAL`].
     pub fn residual(&self, x: &[Real], b: &[Real]) -> Real {
         self.residual_report(x, b).1
     }

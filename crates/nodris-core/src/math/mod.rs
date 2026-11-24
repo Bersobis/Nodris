@@ -6,6 +6,10 @@
 //! Element assembly runs these operations in inner loops, and the kernel is a
 //! library with no dependencies, so the types are written out rather than
 //! pulled from a linear-algebra crate.
+//!
+//! The solver contract is recorded in `docs/SOLVER-GUARANTEES.md` at the
+//! workspace root. It names the SPD input rule, the typed failures and the
+//! pivot and residual checks, and states what the solver does not provide.
 
 pub mod error;
 pub mod index;

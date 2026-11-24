@@ -1,7 +1,7 @@
 //! Typed equation indices and the permutation between numberings.
 //!
 //! Assembly works in the model's original DOF numbering; the banded solver
-//! works in a reordered numbering chosen by [`rcm`](super::linalg::rcm). Both
+//! works in a reordered numbering chosen by [`renumber`](super::linalg::renumber). Both
 //! are `usize` underneath, so an untyped `Vec<usize>` lets a caller pass one
 //! numbering for the other and get a plausible but wrong answer. These
 //! newtypes make the direction of every conversion explicit.

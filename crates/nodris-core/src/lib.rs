@@ -9,6 +9,9 @@
 //! [`units`] is the one place where section tables and material strengths
 //! cross into analysis units.
 //!
+//! The solver's guarantees and limits are recorded in
+//! `docs/SOLVER-GUARANTEES.md` at the workspace root.
+//!
 //! Nodris is a rebuild of Stodola, reconstructed from a plan that numbers its
 //! commits, `P0-02` and so on. Those ids refer to the plan.
 
