@@ -1,8 +1,8 @@
 //! Neutral model entities with stable ids.
 //!
 //! A model holds what an editor can change: nodes, materials, sections,
-//! members, areas, patches, load cases, loads and combinations. None of these
-//! is an analysis element yet; elements are derived later from the same
+//! members, areas, patches, load cases, loads, combinations and supports. None
+//! of these is an analysis element yet; elements are derived later from the same
 //! objects. Ids are `u32` values owned by the document, so a selection or a
 //! reference survives a reorder of the vectors.
 //!
@@ -551,6 +551,104 @@ impl Combination {
     }
 }
 
+/// Six translational and rotational restraint flags at a node.
+///
+/// The order is fixed here so every consumer reads the same DOFs. `true`
+/// means restrained.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Restraints {
+    /// Translation along global X.
+    pub tx: bool,
+    /// Translation along global Y.
+    pub ty: bool,
+    /// Translation along global Z.
+    pub tz: bool,
+    /// Rotation about global X.
+    pub rx: bool,
+    /// Rotation about global Y.
+    pub ry: bool,
+    /// Rotation about global Z.
+    pub rz: bool,
+}
+
+impl Restraints {
+    /// Creates a restraint set from the six named flags.
+    pub const fn new(tx: bool, ty: bool, tz: bool, rx: bool, ry: bool, rz: bool) -> Self {
+        Self {
+            tx,
+            ty,
+            tz,
+            rx,
+            ry,
+            rz,
+        }
+    }
+
+    /// A node with all six DOFs free.
+    pub const fn free() -> Self {
+        Self::new(false, false, false, false, false, false)
+    }
+
+    /// A node with all six DOFs restrained.
+    pub const fn fixed() -> Self {
+        Self::new(true, true, true, true, true, true)
+    }
+}
+
+/// Stable identity of a named support definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SupportDefinitionId(u32);
+
+impl SupportDefinitionId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// A named set of six-DOF restraints users apply by group.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SupportDefinition {
+    /// Stable document id.
+    pub id: SupportDefinitionId,
+    /// Human-facing definition name.
+    pub name: String,
+    /// Restraints this definition applies.
+    pub restraints: Restraints,
+}
+
+impl SupportDefinition {
+    /// Creates a support definition.
+    pub fn new(id: SupportDefinitionId, name: impl Into<String>, restraints: Restraints) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            restraints,
+        }
+    }
+}
+
+/// One node claiming one support definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Support {
+    /// Node receiving the restraints.
+    pub node: NodeId,
+    /// Definition supplying the restraints.
+    pub definition: SupportDefinitionId,
+}
+
+impl Support {
+    /// Creates a support assignment.
+    pub const fn new(node: NodeId, definition: SupportDefinitionId) -> Self {
+        Self { node, definition }
+    }
+}
+
 fn check_knots(
     patch: PatchId,
     degree: u8,
@@ -760,6 +858,9 @@ pub struct Model {
     load_cases: Vec<LoadCase>,
     loads: Vec<Load>,
     combinations: Vec<Combination>,
+    support_definitions: Vec<SupportDefinition>,
+    supports: Vec<Support>,
+    node_restraints: HashMap<NodeId, Restraints>,
 }
 
 impl Model {
@@ -811,6 +912,21 @@ impl Model {
     /// All load combinations in insertion order.
     pub fn combinations(&self) -> &[Combination] {
         &self.combinations
+    }
+
+    /// All named support definitions in insertion order.
+    pub fn support_definitions(&self) -> &[SupportDefinition] {
+        &self.support_definitions
+    }
+
+    /// All node assignments to support definitions.
+    pub fn supports(&self) -> &[Support] {
+        &self.supports
+    }
+
+    /// Reconciled restraints for a node, after `apply_supports`.
+    pub fn node_restraints(&self, node: NodeId) -> Option<Restraints> {
+        self.node_restraints.get(&node).copied()
     }
 
     /// Adds a node, refusing an id that is already in the model.
@@ -1011,6 +1127,91 @@ impl Model {
         Ok(())
     }
 
+    /// Adds a support definition, refusing a duplicate id.
+    pub fn add_support_definition(
+        &mut self,
+        definition: SupportDefinition,
+    ) -> Result<(), ModelError> {
+        if self
+            .support_definitions
+            .iter()
+            .any(|existing| existing.id == definition.id)
+        {
+            return Err(ModelError::DuplicateSupportDefinition { id: definition.id });
+        }
+        self.support_definitions.push(definition);
+        Ok(())
+    }
+
+    /// Replaces a support definition by id so a group edit can be reconciled.
+    pub fn set_support_definition(
+        &mut self,
+        definition: SupportDefinition,
+    ) -> Result<SupportDefinition, ModelError> {
+        let existing = self
+            .support_definitions
+            .iter_mut()
+            .find(|current| current.id == definition.id)
+            .ok_or(ModelError::UnknownSupportDefinition { id: definition.id })?;
+        Ok(std::mem::replace(existing, definition))
+    }
+
+    /// Adds a support assignment, refusing a second claim on the same node.
+    pub fn add_support(&mut self, support: Support) -> Result<(), ModelError> {
+        if let Some(existing) = self.supports.iter().find(|s| s.node == support.node) {
+            return Err(ModelError::MultiClaimedNode {
+                node: support.node,
+                first: existing.definition,
+                second: support.definition,
+            });
+        }
+        if !self.nodes.iter().any(|node| node.id == support.node) {
+            return Err(ModelError::UnknownSupportNode {
+                support: support.node,
+            });
+        }
+        if !self
+            .support_definitions
+            .iter()
+            .any(|definition| definition.id == support.definition)
+        {
+            return Err(ModelError::UnknownSupportDefinition {
+                id: support.definition,
+            });
+        }
+        self.supports.push(support);
+        Ok(())
+    }
+
+    /// Removes a support assignment, leaving the mask stale until reconcile.
+    pub fn remove_support(&mut self, node: NodeId) -> Option<Support> {
+        let position = self
+            .supports
+            .iter()
+            .position(|support| support.node == node)?;
+        Some(self.supports.remove(position))
+    }
+
+    /// Rebuilds node restraints from the current assignments and definitions.
+    ///
+    /// The derived map is cleared first, so a removed or renamed assignment
+    /// cannot leave a stale mask behind.
+    pub fn apply_supports(&mut self) -> Result<(), ModelError> {
+        self.node_restraints.clear();
+        for support in &self.supports {
+            let definition = self
+                .support_definitions
+                .iter()
+                .find(|current| current.id == support.definition)
+                .ok_or(ModelError::UnknownSupportDefinition {
+                    id: support.definition,
+                })?;
+            self.node_restraints
+                .insert(support.node, definition.restraints);
+        }
+        Ok(())
+    }
+
     /// Checks that every member references nodes and a section in the model.
     pub fn validate_references(&self) -> Result<(), ModelError> {
         let index = self.index();
@@ -1114,6 +1315,27 @@ impl Model {
                 }
             }
         }
+        let mut claimed: Vec<(NodeId, SupportDefinitionId)> = Vec::new();
+        for support in &self.supports {
+            if let Some((_, first)) = claimed.iter().find(|(node, _)| *node == support.node) {
+                return Err(ModelError::MultiClaimedNode {
+                    node: support.node,
+                    first: *first,
+                    second: support.definition,
+                });
+            }
+            claimed.push((support.node, support.definition));
+            if index.node(support.node).is_none() {
+                return Err(ModelError::UnknownSupportNode {
+                    support: support.node,
+                });
+            }
+            if index.support_definition(support.definition).is_none() {
+                return Err(ModelError::UnknownSupportDefinition {
+                    id: support.definition,
+                });
+            }
+        }
         Ok(())
     }
 
@@ -1201,6 +1423,18 @@ pub enum ModelError {
     DuplicateCombinationCase {
         combination: CombinationId,
         case: LoadCaseId,
+    },
+    /// A support definition id was used twice.
+    DuplicateSupportDefinition { id: SupportDefinitionId },
+    /// A support assignment references an unknown definition.
+    UnknownSupportDefinition { id: SupportDefinitionId },
+    /// A support assignment references an unknown node.
+    UnknownSupportNode { support: NodeId },
+    /// Two support definitions claim the same node.
+    MultiClaimedNode {
+        node: NodeId,
+        first: SupportDefinitionId,
+        second: SupportDefinitionId,
     },
 }
 
@@ -1322,6 +1556,26 @@ impl fmt::Display for ModelError {
                 combination.get(),
                 case.get()
             ),
+            ModelError::DuplicateSupportDefinition { id } => {
+                write!(f, "duplicate support definition id {}", id.get())
+            }
+            ModelError::UnknownSupportDefinition { id } => {
+                write!(f, "unknown support definition id {}", id.get())
+            }
+            ModelError::UnknownSupportNode { support } => {
+                write!(f, "support references unknown node {}", support.get())
+            }
+            ModelError::MultiClaimedNode {
+                node,
+                first,
+                second,
+            } => write!(
+                f,
+                "node {} is claimed by definitions {} and {}",
+                node.get(),
+                first.get(),
+                second.get()
+            ),
         }
     }
 }
@@ -1342,6 +1596,7 @@ pub struct ModelIndex {
     patches: HashMap<PatchId, usize>,
     load_cases: HashMap<LoadCaseId, usize>,
     combinations: HashMap<CombinationId, usize>,
+    support_definitions: HashMap<SupportDefinitionId, usize>,
 }
 
 impl ModelIndex {
@@ -1379,6 +1634,13 @@ impl ModelIndex {
         for (position, combination) in model.combinations().iter().enumerate() {
             let inserted = index.combinations.insert(combination.id, position);
             debug_assert!(inserted.is_none(), "duplicate combination id in model");
+        }
+        for (position, definition) in model.support_definitions().iter().enumerate() {
+            let inserted = index.support_definitions.insert(definition.id, position);
+            debug_assert!(
+                inserted.is_none(),
+                "duplicate support definition id in model"
+            );
         }
         index
     }
@@ -1421,6 +1683,11 @@ impl ModelIndex {
     /// Position of a combination id in `Model::combinations`.
     pub fn combination(&self, id: CombinationId) -> Option<usize> {
         self.combinations.get(&id).copied()
+    }
+
+    /// Position of a support definition id in `Model::support_definitions`.
+    pub fn support_definition(&self, id: SupportDefinitionId) -> Option<usize> {
+        self.support_definitions.get(&id).copied()
     }
 }
 
@@ -1533,6 +1800,17 @@ mod tests {
             ))
             .unwrap();
         model
+            .add_support_definition(SupportDefinition::new(
+                SupportDefinitionId::new(14),
+                "PIN",
+                Restraints::new(true, true, true, false, false, false),
+            ))
+            .unwrap();
+        model
+            .add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(14)))
+            .unwrap();
+        model.apply_supports().unwrap();
+        model
     }
 
     #[test]
@@ -1545,6 +1823,7 @@ mod tests {
         assert_eq!(PatchId::new(16).get(), 16);
         assert_eq!(LoadCaseId::new(17).get(), 17);
         assert_eq!(CombinationId::new(18).get(), 18);
+        assert_eq!(SupportDefinitionId::new(19).get(), 19);
     }
 
     #[test]
@@ -1561,6 +1840,10 @@ mod tests {
         assert_eq!(index.patch(PatchId::new(6)), Some(0));
         assert_eq!(index.load_case(LoadCaseId::new(10)), Some(0));
         assert_eq!(index.combination(CombinationId::new(13)), Some(0));
+        assert_eq!(
+            index.support_definition(SupportDefinitionId::new(14)),
+            Some(0)
+        );
     }
 
     #[test]
@@ -1574,6 +1857,7 @@ mod tests {
         assert_eq!(index.patch(PatchId::new(99)), None);
         assert_eq!(index.load_case(LoadCaseId::new(99)), None);
         assert_eq!(index.combination(CombinationId::new(99)), None);
+        assert_eq!(index.support_definition(SupportDefinitionId::new(99)), None);
     }
 
     #[test]
@@ -2036,6 +2320,136 @@ mod tests {
             model.add_combination(Combination::new(CombinationId::new(13), "again", vec![])),
             Err(ModelError::DuplicateCombination {
                 id: CombinationId::new(13)
+            })
+        );
+    }
+
+    fn pin_definition() -> SupportDefinition {
+        SupportDefinition::new(
+            SupportDefinitionId::new(14),
+            "PIN",
+            Restraints::new(true, true, true, false, false, false),
+        )
+    }
+
+    #[test]
+    fn duplicate_support_definition_id_is_rejected() {
+        let mut model = nodes_only();
+        model.add_support_definition(pin_definition()).unwrap();
+        assert_eq!(
+            model.add_support_definition(pin_definition()),
+            Err(ModelError::DuplicateSupportDefinition {
+                id: SupportDefinitionId::new(14)
+            })
+        );
+    }
+
+    #[test]
+    fn multi_claimed_node_is_rejected() {
+        let mut model = nodes_only();
+        model.add_support_definition(pin_definition()).unwrap();
+        model
+            .add_support_definition(SupportDefinition::new(
+                SupportDefinitionId::new(15),
+                "FIX",
+                Restraints::fixed(),
+            ))
+            .unwrap();
+        model
+            .add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(14)))
+            .unwrap();
+        assert_eq!(
+            model.add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(15))),
+            Err(ModelError::MultiClaimedNode {
+                node: NodeId::new(7),
+                first: SupportDefinitionId::new(14),
+                second: SupportDefinitionId::new(15),
+            })
+        );
+    }
+
+    #[test]
+    fn support_references_are_checked() {
+        let mut model = nodes_only();
+        model.add_support_definition(pin_definition()).unwrap();
+        assert_eq!(
+            model.add_support(Support::new(NodeId::new(99), SupportDefinitionId::new(14))),
+            Err(ModelError::UnknownSupportNode {
+                support: NodeId::new(99)
+            })
+        );
+        assert_eq!(
+            model.add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(99))),
+            Err(ModelError::UnknownSupportDefinition {
+                id: SupportDefinitionId::new(99)
+            })
+        );
+    }
+
+    #[test]
+    fn apply_supports_builds_node_masks() {
+        let mut model = nodes_only();
+        model.add_support_definition(pin_definition()).unwrap();
+        model
+            .add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(14)))
+            .unwrap();
+        model.apply_supports().unwrap();
+
+        assert_eq!(
+            model.node_restraints(NodeId::new(7)),
+            Some(pin_definition().restraints)
+        );
+        assert_eq!(model.node_restraints(NodeId::new(3)), None);
+    }
+
+    #[test]
+    fn editing_a_definition_reconciles_the_mask() {
+        let mut model = nodes_only();
+        model.add_support_definition(pin_definition()).unwrap();
+        model
+            .add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(14)))
+            .unwrap();
+        model.apply_supports().unwrap();
+
+        model
+            .set_support_definition(SupportDefinition::new(
+                SupportDefinitionId::new(14),
+                "FIX",
+                Restraints::fixed(),
+            ))
+            .unwrap();
+        model.apply_supports().unwrap();
+        assert_eq!(
+            model.node_restraints(NodeId::new(7)),
+            Some(Restraints::fixed())
+        );
+    }
+
+    #[test]
+    fn removing_a_support_clears_the_stale_mask() {
+        let mut model = nodes_only();
+        model.add_support_definition(pin_definition()).unwrap();
+        model
+            .add_support(Support::new(NodeId::new(7), SupportDefinitionId::new(14)))
+            .unwrap();
+        model.apply_supports().unwrap();
+        assert!(model.node_restraints(NodeId::new(7)).is_some());
+
+        assert_eq!(
+            model.remove_support(NodeId::new(7)),
+            Some(Support::new(NodeId::new(7), SupportDefinitionId::new(14)))
+        );
+        model.apply_supports().unwrap();
+        assert_eq!(model.node_restraints(NodeId::new(7)), None);
+    }
+
+    #[test]
+    fn set_support_definition_requires_an_existing_id() {
+        let mut model = nodes_only();
+        assert_eq!(
+            model.set_support_definition(pin_definition()),
+            Err(ModelError::UnknownSupportDefinition {
+                id: SupportDefinitionId::new(14)
             })
         );
     }
