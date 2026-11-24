@@ -24,7 +24,7 @@ pub const MPA: Real = 1.0e6;
 /// Analysis stress units (kN/m²) per MPa.
 ///
 /// One MPa is 10⁶ N/m², which is 10³ kN/m². The kernel stores stress as
-/// force per analysis length squared, so this — not [`MPA`] — is the factor a
+/// force per analysis length squared, so this factor, not [`MPA`], is what a
 /// material strength needs before it reaches a check.
 pub const MPA_TO_KN_M2: Real = MPA / KN;
 

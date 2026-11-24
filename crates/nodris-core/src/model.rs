@@ -322,6 +322,377 @@ impl SplinePatch {
             weights,
         )
     }
+
+    fn grid_shape(&self) -> Option<(usize, usize)> {
+        let columns = self.control_net.first()?.len();
+        if columns == 0 || self.control_net.iter().any(|row| row.len() != columns) {
+            return None;
+        }
+        Some((self.control_net.len(), columns))
+    }
+
+    /// Control-point node ids along one patch edge.
+    ///
+    /// An empty vector means the control net is not rectangular.
+    pub fn edge_nodes(&self, edge: PatchEdge) -> Vec<NodeId> {
+        let Some((rows, columns)) = self.grid_shape() else {
+            return Vec::new();
+        };
+        match edge {
+            PatchEdge::Xi0 => self.control_net[0].clone(),
+            PatchEdge::Xi1 => self.control_net[rows - 1].clone(),
+            PatchEdge::Eta0 => self.control_net.iter().map(|row| row[0]).collect(),
+            PatchEdge::Eta1 => self
+                .control_net
+                .iter()
+                .map(|row| row[columns - 1])
+                .collect(),
+        }
+    }
+
+    /// Reports whether a node is one of the four control-net corners.
+    ///
+    /// A corner is where neighbouring patches in a grid meet without forming
+    /// a seam.
+    fn is_corner(&self, node: NodeId) -> bool {
+        let Some((rows, columns)) = self.grid_shape() else {
+            return false;
+        };
+        let last_row = rows - 1;
+        let last_column = columns - 1;
+        [
+            (0, 0),
+            (0, last_column),
+            (last_row, 0),
+            (last_row, last_column),
+        ]
+        .into_iter()
+        .any(|(row, column)| self.control_net[row][column] == node)
+    }
+
+    /// Knot vector running along one patch edge.
+    pub fn edge_knots(&self, edge: PatchEdge) -> &[Real] {
+        match edge {
+            PatchEdge::Xi0 | PatchEdge::Xi1 => &self.knots_v,
+            PatchEdge::Eta0 | PatchEdge::Eta1 => &self.knots_u,
+        }
+    }
+}
+
+/// One parametric edge of a spline patch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchEdge {
+    /// The edge at `xi = 0`.
+    Xi0,
+    /// The edge at `xi = 1`.
+    Xi1,
+    /// The edge at `eta = 0`.
+    Eta0,
+    /// The edge at `eta = 1`.
+    Eta1,
+}
+
+impl PatchEdge {
+    /// Every edge, useful for seam scans.
+    pub const ALL: [PatchEdge; 4] = [
+        PatchEdge::Xi0,
+        PatchEdge::Xi1,
+        PatchEdge::Eta0,
+        PatchEdge::Eta1,
+    ];
+
+    /// Stable spelling used by reports and the CLI.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PatchEdge::Xi0 => "xi0",
+            PatchEdge::Xi1 => "xi1",
+            PatchEdge::Eta0 => "eta0",
+            PatchEdge::Eta1 => "eta1",
+        }
+    }
+
+    /// Parses a report spelling, case-insensitively.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "xi0" => Some(PatchEdge::Xi0),
+            "xi1" => Some(PatchEdge::Xi1),
+            "eta0" => Some(PatchEdge::Eta0),
+            "eta1" => Some(PatchEdge::Eta1),
+            _ => None,
+        }
+    }
+}
+
+/// Stable identity of a patch tie in the model document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PatchTieId(u32);
+
+impl PatchTieId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// A declared master and slave edge pair that must move together.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PatchTie {
+    /// Stable document id.
+    pub id: PatchTieId,
+    /// Patch supplying the constraint weights.
+    pub master: PatchId,
+    /// Edge of the master patch.
+    pub master_edge: PatchEdge,
+    /// Patch whose edge is eliminated.
+    pub slave: PatchId,
+    /// Edge of the slave patch.
+    pub slave_edge: PatchEdge,
+}
+
+impl PatchTie {
+    /// Creates a patch tie declaration.
+    pub const fn new(
+        id: PatchTieId,
+        master: PatchId,
+        master_edge: PatchEdge,
+        slave: PatchId,
+        slave_edge: PatchEdge,
+    ) -> Self {
+        Self {
+            id,
+            master,
+            master_edge,
+            slave,
+            slave_edge,
+        }
+    }
+}
+
+/// Which end of a member was found on a patch edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BeamEnd {
+    /// The member's start node.
+    Start,
+    /// The member's end node.
+    End,
+}
+
+impl BeamEnd {
+    /// Stable spelling used by reports and the CLI.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            BeamEnd::Start => "start",
+            BeamEnd::End => "end",
+        }
+    }
+}
+
+/// A member end detected on a patch edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BeamCoupling {
+    /// Member whose end sits on the edge.
+    pub member: MemberId,
+    /// Which end was found.
+    pub end: BeamEnd,
+    /// Patch whose edge contains the node.
+    pub patch: PatchId,
+    /// Edge containing the node.
+    pub edge: PatchEdge,
+    /// Node at the member end.
+    pub node: NodeId,
+}
+
+impl BeamCoupling {
+    /// Creates a beam coupling record.
+    pub const fn new(
+        member: MemberId,
+        end: BeamEnd,
+        patch: PatchId,
+        edge: PatchEdge,
+        node: NodeId,
+    ) -> Self {
+        Self {
+            member,
+            end,
+            patch,
+            edge,
+            node,
+        }
+    }
+}
+
+/// How two patch edges are coupled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchCoupling {
+    /// The edges already share every control-point node.
+    Shared { node_count: usize },
+    /// A declared `PatchTie` joins the two patches.
+    Tied { tie: PatchTieId },
+    /// The patches share control points that do not form one common edge.
+    NeedTie { node: NodeId },
+}
+
+/// One exact control-point constraint row produced by a tie.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TieConstraint {
+    /// Slave node eliminated by this constraint.
+    pub slave: NodeId,
+    /// Master nodes carrying the displacement.
+    pub masters: Vec<NodeId>,
+    /// Interpolation weights, parallel to `masters`.
+    pub weights: Vec<Real>,
+}
+
+fn patch_by_id(patches: &[SplinePatch], id: PatchId) -> Option<&SplinePatch> {
+    patches.iter().find(|patch| patch.id == id)
+}
+
+/// Reports whether a tie joins the given patch pair, in either role.
+///
+/// The declared edges are not compared here. A tie is the statement that
+/// these two patches are joined, and its edges were checked when it was
+/// added.
+fn tie_covers_patches(tie: &PatchTie, first: PatchId, second: PatchId) -> bool {
+    (tie.master == first && tie.slave == second) || (tie.master == second && tie.slave == first)
+}
+
+/// The edge of `patch` that holds every node in `shared`.
+fn edge_holding(patch: &SplinePatch, shared: &[NodeId]) -> Option<PatchEdge> {
+    PatchEdge::ALL.into_iter().find(|edge| {
+        let nodes = patch.edge_nodes(*edge);
+        !nodes.is_empty() && shared.iter().all(|node| nodes.contains(node))
+    })
+}
+
+/// Resolves how two patches meet.
+///
+/// A declared tie wins, because a tie is how two differently refined patches
+/// are joined. Otherwise the patches are compared by the control points they
+/// have in common: none means they are independent, a lone corner is a joint,
+/// and anything else is a seam that must be fully shared.
+fn coupling_between(
+    patches: &[SplinePatch],
+    ties: &[PatchTie],
+    first: PatchId,
+    second: PatchId,
+) -> Option<PatchCoupling> {
+    if first == second {
+        return None;
+    }
+    let a = patch_by_id(patches, first)?;
+    let b = patch_by_id(patches, second)?;
+    if let Some(tie) = ties
+        .iter()
+        .find(|tie| tie_covers_patches(tie, first, second))
+    {
+        return Some(PatchCoupling::Tied { tie: tie.id });
+    }
+    let a_nodes: Vec<NodeId> = a.control_net.iter().flatten().copied().collect();
+    let b_nodes: Vec<NodeId> = b.control_net.iter().flatten().copied().collect();
+    let mut shared: Vec<NodeId> = Vec::new();
+    for node in a_nodes {
+        if b_nodes.contains(&node) && !shared.contains(&node) {
+            shared.push(node);
+        }
+    }
+    let first_shared = *shared.first()?;
+    // Four patches around one corner share that corner and nothing else. That
+    // is a joint, not a seam, so it needs no tie.
+    if shared.len() == 1 && a.is_corner(first_shared) && b.is_corner(first_shared) {
+        return None;
+    }
+    let (Some(edge_a), Some(edge_b)) = (edge_holding(a, &shared), edge_holding(b, &shared)) else {
+        return Some(PatchCoupling::NeedTie { node: first_shared });
+    };
+    let count = shared.len();
+    if count == a.edge_nodes(edge_a).len() && count == b.edge_nodes(edge_b).len() {
+        return Some(PatchCoupling::Shared { node_count: count });
+    }
+    Some(PatchCoupling::NeedTie { node: first_shared })
+}
+
+/// Checks one tie against the other declarations.
+///
+/// `ties` may or may not already contain `tie`. Entries sharing its id are
+/// skipped, so the caller can validate a candidate before pushing it.
+fn check_tie(patches: &[SplinePatch], ties: &[PatchTie], tie: &PatchTie) -> Result<(), ModelError> {
+    if tie.master == tie.slave {
+        return Err(ModelError::PatchTieSamePatch {
+            tie: tie.id,
+            patch: tie.master,
+        });
+    }
+    let master = patch_by_id(patches, tie.master).ok_or(ModelError::UnknownPatchTiePatch {
+        tie: tie.id,
+        patch: tie.master,
+    })?;
+    let slave = patch_by_id(patches, tie.slave).ok_or(ModelError::UnknownPatchTiePatch {
+        tie: tie.id,
+        patch: tie.slave,
+    })?;
+    let master_nodes = master.edge_nodes(tie.master_edge);
+    let slave_nodes = slave.edge_nodes(tie.slave_edge);
+    if master_nodes.is_empty()
+        || master_nodes.len() != slave_nodes.len()
+        || master.edge_knots(tie.master_edge) != slave.edge_knots(tie.slave_edge)
+    {
+        return Err(ModelError::PatchTieEdgeShape { tie: tie.id });
+    }
+    // One master may drive several slaves, but a slave node cannot follow two
+    // different masters. Overlapping slave edges from different masters would
+    // constrain the same node twice.
+    for other in ties.iter().filter(|other| other.id != tie.id) {
+        if other.master == tie.master {
+            continue;
+        }
+        let other_slave = match patch_by_id(patches, other.slave) {
+            Some(patch) => patch,
+            None => continue,
+        };
+        if let Some(node) = slave_nodes
+            .iter()
+            .find(|node| other_slave.edge_nodes(other.slave_edge).contains(node))
+        {
+            return Err(ModelError::PatchTieSlaveTwoMasters {
+                node: *node,
+                first: other.master,
+                second: tie.master,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Checks every declared tie plus the seams between all patch pairs.
+fn check_ties(patches: &[SplinePatch], ties: &[PatchTie]) -> Result<(), ModelError> {
+    for (position, tie) in ties.iter().enumerate() {
+        if ties[..position]
+            .iter()
+            .any(|previous| previous.id == tie.id)
+        {
+            return Err(ModelError::DuplicatePatchTie { id: tie.id });
+        }
+        check_tie(patches, ties, tie)?;
+    }
+    for (position, first) in patches.iter().enumerate() {
+        for second in &patches[position + 1..] {
+            if let Some(PatchCoupling::NeedTie { node }) =
+                coupling_between(patches, ties, first.id, second.id)
+            {
+                return Err(ModelError::TJunctionWithoutTie {
+                    first: first.id,
+                    second: second.id,
+                    node,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Stable identity of a load case in the model document.
@@ -674,6 +1045,8 @@ pub enum ObjectKind {
     Combination,
     /// A named support definition.
     SupportDefinition,
+    /// A declared patch tie.
+    PatchTie,
 }
 
 impl ObjectKind {
@@ -690,6 +1063,7 @@ impl ObjectKind {
             ObjectKind::LoadCase => "load_case",
             ObjectKind::Combination => "combination",
             ObjectKind::SupportDefinition => "support_definition",
+            ObjectKind::PatchTie => "patch_tie",
         }
     }
 
@@ -706,6 +1080,7 @@ impl ObjectKind {
             "load_case" => Some(ObjectKind::LoadCase),
             "combination" => Some(ObjectKind::Combination),
             "support_definition" => Some(ObjectKind::SupportDefinition),
+            "patch_tie" => Some(ObjectKind::PatchTie),
             _ => None,
         }
     }
@@ -1003,6 +1378,7 @@ pub struct Model {
     support_definitions: Vec<SupportDefinition>,
     supports: Vec<Support>,
     node_restraints: HashMap<NodeId, Restraints>,
+    patch_ties: Vec<PatchTie>,
 }
 
 impl Model {
@@ -1064,6 +1440,11 @@ impl Model {
     /// All node assignments to support definitions.
     pub fn supports(&self) -> &[Support] {
         &self.supports
+    }
+
+    /// All declared patch ties.
+    pub fn patch_ties(&self) -> &[PatchTie] {
+        &self.patch_ties
     }
 
     /// Reconciled restraints for a node, after `apply_supports`.
@@ -1354,12 +1735,88 @@ impl Model {
         Ok(())
     }
 
+    /// Adds a tie declaration, refusing a bad seam or a second master.
+    pub fn add_patch_tie(&mut self, tie: PatchTie) -> Result<(), ModelError> {
+        if self.patch_ties.iter().any(|existing| existing.id == tie.id) {
+            return Err(ModelError::DuplicatePatchTie { id: tie.id });
+        }
+        check_tie(&self.patches, &self.patch_ties, &tie)?;
+        self.patch_ties.push(tie);
+        Ok(())
+    }
+
+    /// Resolves how two patch edges are coupled, if they touch at all.
+    pub fn patch_coupling(&self, first: PatchId, second: PatchId) -> Option<PatchCoupling> {
+        coupling_between(&self.patches, &self.patch_ties, first, second)
+    }
+
+    /// Finds member ends that coincide with patch edge control points.
+    ///
+    /// Only control-point coincidence is detected. A member end in the
+    /// interior of an edge curve needs spline evaluation and is out of scope
+    /// for the model layer.
+    pub fn beam_couplings(&self) -> Vec<BeamCoupling> {
+        let mut couplings = Vec::new();
+        for member in &self.members {
+            for (node, end) in [(member.start, BeamEnd::Start), (member.end, BeamEnd::End)] {
+                for patch in &self.patches {
+                    for edge in PatchEdge::ALL {
+                        if patch.edge_nodes(edge).contains(&node) {
+                            couplings.push(BeamCoupling::new(member.id, end, patch.id, edge, node));
+                        }
+                    }
+                }
+            }
+        }
+        couplings
+    }
+
+    /// Builds exact control-point constraint rows from declared ties.
+    ///
+    /// A node that sits on both the master and the slave edge is already one
+    /// unknown, so it produces no row. Interior mortar constraints are an
+    /// analysis concern and are not produced here.
+    pub fn tie_constraints(&self) -> Result<Vec<TieConstraint>, ModelError> {
+        self.validate_ties()?;
+        let mut rows = Vec::new();
+        for tie in &self.patch_ties {
+            let master =
+                patch_by_id(&self.patches, tie.master).ok_or(ModelError::UnknownPatchTiePatch {
+                    tie: tie.id,
+                    patch: tie.master,
+                })?;
+            let slave =
+                patch_by_id(&self.patches, tie.slave).ok_or(ModelError::UnknownPatchTiePatch {
+                    tie: tie.id,
+                    patch: tie.slave,
+                })?;
+            let masters = master.edge_nodes(tie.master_edge);
+            let slaves = slave.edge_nodes(tie.slave_edge);
+            for (slave_node, master_node) in slaves.into_iter().zip(masters) {
+                if slave_node == master_node {
+                    continue;
+                }
+                rows.push(TieConstraint {
+                    slave: slave_node,
+                    masters: vec![master_node],
+                    weights: vec![1.0],
+                });
+            }
+        }
+        Ok(rows)
+    }
+
+    fn validate_ties(&self) -> Result<(), ModelError> {
+        check_ties(&self.patches, &self.patch_ties)
+    }
+
     /// Checks the model's structural rules.
     ///
     /// This is the blocking contract. Non-blocking observations live in
     /// [`Model::validate_issues`].
     pub fn validate(&self) -> Result<(), ModelError> {
-        self.validate_references()
+        self.validate_references()?;
+        self.validate_ties()
     }
 
     /// Checks that every member references nodes and a section in the model.
@@ -1629,6 +2086,26 @@ pub enum ModelError {
         first: SupportDefinitionId,
         second: SupportDefinitionId,
     },
+    /// A patch tie id was used twice.
+    DuplicatePatchTie { id: PatchTieId },
+    /// A patch tie references a patch that is not in the model.
+    UnknownPatchTiePatch { tie: PatchTieId, patch: PatchId },
+    /// A patch tie names the same patch as master and slave.
+    PatchTieSamePatch { tie: PatchTieId, patch: PatchId },
+    /// A tie joins edges whose control points cannot be matched one to one.
+    PatchTieEdgeShape { tie: PatchTieId },
+    /// A slave edge is shared by two different master patches.
+    PatchTieSlaveTwoMasters {
+        node: NodeId,
+        first: PatchId,
+        second: PatchId,
+    },
+    /// Two patches share part of an edge without a tie declaration.
+    TJunctionWithoutTie {
+        first: PatchId,
+        second: PatchId,
+        node: NodeId,
+    },
 }
 
 impl fmt::Display for ModelError {
@@ -1769,6 +2246,48 @@ impl fmt::Display for ModelError {
                 first.get(),
                 second.get()
             ),
+            ModelError::DuplicatePatchTie { id } => {
+                write!(f, "duplicate patch tie id {}", id.get())
+            }
+            ModelError::UnknownPatchTiePatch { tie, patch } => write!(
+                f,
+                "patch tie {} references unknown patch {}",
+                tie.get(),
+                patch.get()
+            ),
+            ModelError::PatchTieEdgeShape { tie } => write!(
+                f,
+                "patch tie {} joins edges with different control-point layouts",
+                tie.get()
+            ),
+            ModelError::PatchTieSamePatch { tie, patch } => write!(
+                f,
+                "patch tie {} names patch {} as both master and slave",
+                tie.get(),
+                patch.get()
+            ),
+            ModelError::PatchTieSlaveTwoMasters {
+                node,
+                first,
+                second,
+            } => write!(
+                f,
+                "slave node {} is tied to masters {} and {}",
+                node.get(),
+                first.get(),
+                second.get()
+            ),
+            ModelError::TJunctionWithoutTie {
+                first,
+                second,
+                node,
+            } => write!(
+                f,
+                "patches {} and {} share only part of an edge at node {}; add a tie or match the control points",
+                first.get(),
+                second.get(),
+                node.get()
+            ),
         }
     }
 }
@@ -1830,6 +2349,16 @@ impl ModelError {
             }
             ModelError::MultiClaimedNode { node, .. } => {
                 ObjectRef::new(ObjectKind::Node, node.get())
+            }
+            ModelError::DuplicatePatchTie { id }
+            | ModelError::UnknownPatchTiePatch { tie: id, .. }
+            | ModelError::PatchTieSamePatch { tie: id, .. }
+            | ModelError::PatchTieEdgeShape { tie: id } => {
+                ObjectRef::new(ObjectKind::PatchTie, id.get())
+            }
+            ModelError::PatchTieSlaveTwoMasters { first, .. }
+            | ModelError::TJunctionWithoutTie { first, .. } => {
+                ObjectRef::new(ObjectKind::Patch, first.get())
             }
         };
         ValidationIssue::blocking(object, self.to_string())
@@ -2439,6 +2968,447 @@ mod tests {
         assert_eq!(PatchDirection::V.as_str(), "v");
     }
 
+    fn add_nodes(model: &mut Model, ids: &[u32]) {
+        for id in ids {
+            model
+                .add_node(Node::new(NodeId::new(*id), f64::from(*id), 0.0, 0.0))
+                .unwrap();
+        }
+    }
+
+    /// Two patches whose `xi0` rows overlap on two of three control points.
+    fn patches_with_partial_edge() -> Model {
+        let mut model = Model::new();
+        add_nodes(&mut model, &[1, 2, 3, 4, 5, 6, 7, 8]);
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(1),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 0.5, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)],
+                    vec![NodeId::new(4), NodeId::new(5), NodeId::new(6)],
+                ],
+            ))
+            .unwrap();
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(2),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 0.5, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(1), NodeId::new(2), NodeId::new(7)],
+                    vec![NodeId::new(4), NodeId::new(5), NodeId::new(8)],
+                ],
+            ))
+            .unwrap();
+        model
+    }
+
+    /// Two patches that already share a whole edge.
+    fn patches_sharing_edge() -> Model {
+        let mut model = Model::new();
+        add_nodes(&mut model, &[1, 2, 3, 4, 5, 6]);
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(1),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(1), NodeId::new(2)],
+                    vec![NodeId::new(3), NodeId::new(4)],
+                ],
+            ))
+            .unwrap();
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(2),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(3), NodeId::new(4)],
+                    vec![NodeId::new(5), NodeId::new(6)],
+                ],
+            ))
+            .unwrap();
+        model
+    }
+
+    #[test]
+    fn patch_edges_follow_the_control_net() {
+        let patch = SplinePatch::unweighted(
+            PatchId::new(1),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.5, 1.0, 1.0],
+            vec![
+                vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)],
+                vec![NodeId::new(4), NodeId::new(5), NodeId::new(6)],
+            ],
+        );
+        assert_eq!(
+            patch.edge_nodes(PatchEdge::Xi0),
+            vec![NodeId::new(1), NodeId::new(2), NodeId::new(3)]
+        );
+        assert_eq!(
+            patch.edge_nodes(PatchEdge::Xi1),
+            vec![NodeId::new(4), NodeId::new(5), NodeId::new(6)]
+        );
+        assert_eq!(
+            patch.edge_nodes(PatchEdge::Eta0),
+            vec![NodeId::new(1), NodeId::new(4)]
+        );
+        assert_eq!(
+            patch.edge_nodes(PatchEdge::Eta1),
+            vec![NodeId::new(3), NodeId::new(6)]
+        );
+        assert_eq!(patch.edge_knots(PatchEdge::Xi0), &[0.0, 0.0, 0.5, 1.0, 1.0]);
+        assert_eq!(patch.edge_knots(PatchEdge::Eta0), &[0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn patch_edge_spellings_round_trip() {
+        for edge in PatchEdge::ALL {
+            assert_eq!(PatchEdge::parse(edge.as_str()), Some(edge));
+        }
+        assert_eq!(PatchEdge::parse(" ETA1 "), Some(PatchEdge::Eta1));
+        assert_eq!(PatchEdge::parse("xi2"), None);
+    }
+
+    #[test]
+    fn a_fully_shared_edge_needs_no_tie() {
+        let model = patches_sharing_edge();
+        assert_eq!(
+            model.patch_coupling(PatchId::new(1), PatchId::new(2)),
+            Some(PatchCoupling::Shared { node_count: 2 })
+        );
+        assert_eq!(model.validate(), Ok(()));
+    }
+
+    /// Two patches that meet at one corner only, as in a grid.
+    fn patches_touching_at_a_corner() -> Model {
+        let mut model = Model::new();
+        add_nodes(&mut model, &[1, 2, 3, 4, 5, 6, 7]);
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(1),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(1), NodeId::new(2)],
+                    vec![NodeId::new(3), NodeId::new(4)],
+                ],
+            ))
+            .unwrap();
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(2),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(4), NodeId::new(5)],
+                    vec![NodeId::new(6), NodeId::new(7)],
+                ],
+            ))
+            .unwrap();
+        model
+    }
+
+    /// The tie that joins the overlapping `xi0` rows of patches 1 and 2.
+    fn partial_edge_tie(id: u32) -> PatchTie {
+        PatchTie::new(
+            PatchTieId::new(id),
+            PatchId::new(1),
+            PatchEdge::Xi0,
+            PatchId::new(2),
+            PatchEdge::Xi0,
+        )
+    }
+
+    /// Adds a patch whose `xi0` row has two control points where patch 1 has
+    /// three.
+    fn patches_with_uneven_edge() -> Model {
+        let mut model = patches_with_partial_edge();
+        add_nodes(&mut model, &[13]);
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(4),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(1), NodeId::new(2)],
+                    vec![NodeId::new(4), NodeId::new(13)],
+                ],
+            ))
+            .unwrap();
+        model
+    }
+
+    /// Adds a third patch that can reach the second patch's other slave edge.
+    fn patches_with_three_patches() -> Model {
+        let mut model = patches_with_partial_edge();
+        add_nodes(&mut model, &[13, 14, 15, 16, 17, 18]);
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(3),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 0.5, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(13), NodeId::new(14), NodeId::new(17)],
+                    vec![NodeId::new(15), NodeId::new(16), NodeId::new(18)],
+                ],
+            ))
+            .unwrap();
+        model
+    }
+
+    #[test]
+    fn a_shared_corner_is_a_joint_not_a_seam() {
+        let model = patches_touching_at_a_corner();
+        assert_eq!(model.patch_coupling(PatchId::new(1), PatchId::new(2)), None);
+        assert_eq!(model.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_declared_tie_marks_the_pair_as_tied() {
+        let mut model = patches_touching_at_a_corner();
+        let tie = PatchTie::new(
+            PatchTieId::new(1),
+            PatchId::new(1),
+            PatchEdge::Xi1,
+            PatchId::new(2),
+            PatchEdge::Xi0,
+        );
+        assert_eq!(model.add_patch_tie(tie), Ok(()));
+        assert_eq!(
+            model.patch_coupling(PatchId::new(1), PatchId::new(2)),
+            Some(PatchCoupling::Tied {
+                tie: PatchTieId::new(1)
+            })
+        );
+    }
+
+    #[test]
+    fn a_tie_cannot_name_one_patch_twice() {
+        let mut model = patches_with_partial_edge();
+        let tie = PatchTie::new(
+            PatchTieId::new(1),
+            PatchId::new(1),
+            PatchEdge::Xi0,
+            PatchId::new(1),
+            PatchEdge::Xi1,
+        );
+        assert_eq!(
+            model.add_patch_tie(tie),
+            Err(ModelError::PatchTieSamePatch {
+                tie: PatchTieId::new(1),
+                patch: PatchId::new(1),
+            })
+        );
+    }
+
+    #[test]
+    fn coupling_with_an_unknown_patch_is_none() {
+        let model = patches_with_partial_edge();
+        assert_eq!(model.patch_coupling(PatchId::new(1), PatchId::new(9)), None);
+        assert_eq!(model.patch_coupling(PatchId::new(9), PatchId::new(1)), None);
+    }
+
+    #[test]
+    fn a_partial_edge_share_needs_a_tie() {
+        let model = patches_with_partial_edge();
+        assert_eq!(
+            model.patch_coupling(PatchId::new(1), PatchId::new(2)),
+            Some(PatchCoupling::NeedTie {
+                node: NodeId::new(1)
+            })
+        );
+        assert_eq!(
+            model.validate(),
+            Err(ModelError::TJunctionWithoutTie {
+                first: PatchId::new(1),
+                second: PatchId::new(2),
+                node: NodeId::new(1),
+            })
+        );
+    }
+
+    #[test]
+    fn a_tie_resolves_the_seam() {
+        let mut model = patches_with_partial_edge();
+        assert_eq!(model.add_patch_tie(partial_edge_tie(1)), Ok(()));
+        assert_eq!(model.patch_ties().len(), 1);
+        assert_eq!(
+            model.patch_coupling(PatchId::new(1), PatchId::new(2)),
+            Some(PatchCoupling::Tied {
+                tie: PatchTieId::new(1)
+            })
+        );
+        assert_eq!(model.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_tie_needs_matching_control_point_counts() {
+        let mut model = patches_with_uneven_edge();
+        let tie = PatchTie::new(
+            PatchTieId::new(1),
+            PatchId::new(1),
+            PatchEdge::Xi0,
+            PatchId::new(4),
+            PatchEdge::Xi0,
+        );
+        assert_eq!(
+            model.add_patch_tie(tie),
+            Err(ModelError::PatchTieEdgeShape {
+                tie: PatchTieId::new(1)
+            })
+        );
+    }
+
+    #[test]
+    fn a_tie_to_an_unknown_patch_is_rejected() {
+        let mut model = patches_with_partial_edge();
+        let tie = PatchTie::new(
+            PatchTieId::new(1),
+            PatchId::new(9),
+            PatchEdge::Xi0,
+            PatchId::new(2),
+            PatchEdge::Xi0,
+        );
+        assert_eq!(
+            model.add_patch_tie(tie),
+            Err(ModelError::UnknownPatchTiePatch {
+                tie: PatchTieId::new(1),
+                patch: PatchId::new(9),
+            })
+        );
+    }
+
+    #[test]
+    fn duplicate_tie_ids_are_rejected() {
+        let mut model = patches_with_partial_edge();
+        let tie = partial_edge_tie(1);
+        model.add_patch_tie(tie).unwrap();
+        assert_eq!(
+            model.add_patch_tie(tie),
+            Err(ModelError::DuplicatePatchTie {
+                id: PatchTieId::new(1)
+            })
+        );
+    }
+
+    #[test]
+    fn a_slave_edge_cannot_serve_two_masters() {
+        let mut model = patches_with_three_patches();
+        model.add_patch_tie(partial_edge_tie(1)).unwrap();
+        let second = PatchTie::new(
+            PatchTieId::new(2),
+            PatchId::new(3),
+            PatchEdge::Eta0,
+            PatchId::new(2),
+            PatchEdge::Eta0,
+        );
+        assert_eq!(
+            model.add_patch_tie(second),
+            Err(ModelError::PatchTieSlaveTwoMasters {
+                node: NodeId::new(1),
+                first: PatchId::new(1),
+                second: PatchId::new(3),
+            })
+        );
+    }
+
+    #[test]
+    fn a_tie_eliminates_only_the_unshared_slave_nodes() {
+        let mut model = patches_with_partial_edge();
+        model.add_patch_tie(partial_edge_tie(1)).unwrap();
+        assert_eq!(
+            model.tie_constraints().unwrap(),
+            vec![TieConstraint {
+                slave: NodeId::new(7),
+                masters: vec![NodeId::new(3)],
+                weights: vec![1.0],
+            }]
+        );
+    }
+
+    #[test]
+    fn beam_ends_on_a_patch_edge_are_reported() {
+        assert!(patches_with_partial_edge().beam_couplings().is_empty());
+        assert_eq!(
+            full_model().beam_couplings(),
+            vec![
+                BeamCoupling::new(
+                    MemberId::new(4),
+                    BeamEnd::Start,
+                    PatchId::new(6),
+                    PatchEdge::Xi0,
+                    NodeId::new(7),
+                ),
+                BeamCoupling::new(
+                    MemberId::new(4),
+                    BeamEnd::Start,
+                    PatchId::new(6),
+                    PatchEdge::Eta0,
+                    NodeId::new(7),
+                ),
+                BeamCoupling::new(
+                    MemberId::new(4),
+                    BeamEnd::End,
+                    PatchId::new(6),
+                    PatchEdge::Xi0,
+                    NodeId::new(3),
+                ),
+                BeamCoupling::new(
+                    MemberId::new(4),
+                    BeamEnd::End,
+                    PatchId::new(6),
+                    PatchEdge::Eta1,
+                    NodeId::new(3),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn tie_errors_name_the_tie_and_the_patch() {
+        let shape = ModelError::PatchTieEdgeShape {
+            tie: PatchTieId::new(1),
+        };
+        assert_eq!(
+            shape.to_string(),
+            "patch tie 1 joins edges with different control-point layouts"
+        );
+        assert_eq!(
+            shape.to_issue().object,
+            ObjectRef::new(ObjectKind::PatchTie, 1)
+        );
+        let seam = ModelError::TJunctionWithoutTie {
+            first: PatchId::new(1),
+            second: PatchId::new(2),
+            node: NodeId::new(3),
+        };
+        assert!(seam.to_string().contains("patches 1 and 2"));
+        assert_eq!(seam.to_issue().object, ObjectRef::new(ObjectKind::Patch, 1));
+    }
+
     #[test]
     fn load_case_self_weight_is_explicit() {
         let plain = LoadCase::new(LoadCaseId::new(1), "D");
@@ -2721,6 +3691,7 @@ mod tests {
             ObjectKind::LoadCase,
             ObjectKind::Combination,
             ObjectKind::SupportDefinition,
+            ObjectKind::PatchTie,
         ] {
             assert_eq!(ObjectKind::parse(kind.as_str()), Some(kind));
         }
