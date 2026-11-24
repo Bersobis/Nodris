@@ -1,10 +1,10 @@
 //! Neutral model entities with stable ids.
 //!
 //! A model holds what an editor can change: nodes, materials, sections,
-//! members, areas and spline patches. None of these is an analysis element yet;
-//! elements are derived later from the same objects. Ids are `u32` values owned
-//! by the document, so a selection or a reference survives a reorder of the
-//! vectors.
+//! members, areas, patches, load cases, loads and combinations. None of these
+//! is an analysis element yet; elements are derived later from the same
+//! objects. Ids are `u32` values owned by the document, so a selection or a
+//! reference survives a reorder of the vectors.
 //!
 //! Coordinates and section properties are stored in SI. A section table that
 //! quotes mm, mm², mm⁴ or mm⁶ crosses [`crate::units`] once in `Section::from_tables`
@@ -322,6 +322,235 @@ impl SplinePatch {
     }
 }
 
+/// Stable identity of a load case in the model document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LoadCaseId(u32);
+
+impl LoadCaseId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Stable identity of a load combination in the model document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CombinationId(u32);
+
+impl CombinationId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// A named group of loads that combinations can factor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoadCase {
+    /// Stable document id.
+    pub id: LoadCaseId,
+    /// Human-facing case name.
+    pub name: String,
+    /// Whether self-weight belongs to this case.
+    pub self_weight: bool,
+}
+
+impl LoadCase {
+    /// Creates a case without self-weight.
+    pub fn new(id: LoadCaseId, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            self_weight: false,
+        }
+    }
+
+    /// Marks the case as carrying self-weight.
+    pub fn with_self_weight(mut self) -> Self {
+        self.self_weight = true;
+        self
+    }
+}
+
+/// A force and moment applied directly to a node.
+///
+/// Forces are in kN, moments in kN·m, in global axes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NodalLoad {
+    /// Node receiving the load.
+    pub node: NodeId,
+    /// Global force components X, Y, Z in kN.
+    pub force: [Real; 3],
+    /// Global moment components X, Y, Z in kN·m.
+    pub moment: [Real; 3],
+}
+
+impl NodalLoad {
+    /// Creates a nodal load from global components.
+    pub const fn new(node: NodeId, force: [Real; 3], moment: [Real; 3]) -> Self {
+        Self {
+            node,
+            force,
+            moment,
+        }
+    }
+}
+
+/// A distributed load on a member, in global axes per unit length.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MemberLoad {
+    /// Member receiving the load.
+    pub member: MemberId,
+    /// Global force per length, X, Y, Z in kN/m.
+    pub force: [Real; 3],
+    /// Global moment per length, X, Y, Z in kN.
+    pub moment: [Real; 3],
+}
+
+impl MemberLoad {
+    /// Creates a member load from global components.
+    pub const fn new(member: MemberId, force: [Real; 3], moment: [Real; 3]) -> Self {
+        Self {
+            member,
+            force,
+            moment,
+        }
+    }
+}
+
+/// A pressure on an area, positive along global Z, in kN/m².
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AreaLoad {
+    /// Area receiving the load.
+    pub area: AreaId,
+    /// Pressure in kN/m².
+    pub pressure: Real,
+}
+
+impl AreaLoad {
+    /// Creates an area pressure.
+    pub const fn new(area: AreaId, pressure: Real) -> Self {
+        Self { area, pressure }
+    }
+}
+
+/// A pressure on a spline patch, positive along global Z, in kN/m².
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatchLoad {
+    /// Patch receiving the load.
+    pub patch: PatchId,
+    /// Pressure in kN/m².
+    pub pressure: Real,
+}
+
+impl PatchLoad {
+    /// Creates a patch pressure.
+    pub const fn new(patch: PatchId, pressure: Real) -> Self {
+        Self { patch, pressure }
+    }
+}
+
+/// One applied load and the case it belongs to.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Load {
+    /// A load applied to a node.
+    Nodal {
+        /// Owning case.
+        case: LoadCaseId,
+        /// Load value.
+        load: NodalLoad,
+    },
+    /// A distributed load applied to a member.
+    Member {
+        /// Owning case.
+        case: LoadCaseId,
+        /// Load value.
+        load: MemberLoad,
+    },
+    /// A pressure applied to an area.
+    Area {
+        /// Owning case.
+        case: LoadCaseId,
+        /// Load value.
+        load: AreaLoad,
+    },
+    /// A pressure applied to a spline patch.
+    Patch {
+        /// Owning case.
+        case: LoadCaseId,
+        /// Load value.
+        load: PatchLoad,
+    },
+}
+
+impl Load {
+    /// The case that owns this load.
+    pub const fn case(&self) -> LoadCaseId {
+        match self {
+            Load::Nodal { case, .. }
+            | Load::Member { case, .. }
+            | Load::Area { case, .. }
+            | Load::Patch { case, .. } => *case,
+        }
+    }
+
+    fn is_finite(&self) -> bool {
+        match self {
+            Load::Nodal { load, .. } => load
+                .force
+                .iter()
+                .chain(load.moment.iter())
+                .all(|v| v.is_finite()),
+            Load::Member { load, .. } => load
+                .force
+                .iter()
+                .chain(load.moment.iter())
+                .all(|v| v.is_finite()),
+            Load::Area { load, .. } => load.pressure.is_finite(),
+            Load::Patch { load, .. } => load.pressure.is_finite(),
+        }
+    }
+}
+
+/// A named linear combination of load cases.
+///
+/// A model with no combinations receives one implicit combination at solve
+/// time; the document never has to store that default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Combination {
+    /// Stable document id.
+    pub id: CombinationId,
+    /// Human-facing combination name.
+    pub name: String,
+    /// Case id and factor pairs.
+    pub factors: Vec<(LoadCaseId, Real)>,
+}
+
+impl Combination {
+    /// Creates a combination from case id and factor pairs.
+    pub fn new(
+        id: CombinationId,
+        name: impl Into<String>,
+        factors: Vec<(LoadCaseId, Real)>,
+    ) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            factors,
+        }
+    }
+}
+
 fn check_knots(
     patch: PatchId,
     degree: u8,
@@ -528,6 +757,9 @@ pub struct Model {
     members: Vec<Member>,
     areas: Vec<Area>,
     patches: Vec<SplinePatch>,
+    load_cases: Vec<LoadCase>,
+    loads: Vec<Load>,
+    combinations: Vec<Combination>,
 }
 
 impl Model {
@@ -564,6 +796,21 @@ impl Model {
     /// All spline patches in insertion order.
     pub fn patches(&self) -> &[SplinePatch] {
         &self.patches
+    }
+
+    /// All load cases in insertion order.
+    pub fn load_cases(&self) -> &[LoadCase] {
+        &self.load_cases
+    }
+
+    /// All applied loads in insertion order.
+    pub fn loads(&self) -> &[Load] {
+        &self.loads
+    }
+
+    /// All load combinations in insertion order.
+    pub fn combinations(&self) -> &[Combination] {
+        &self.combinations
     }
 
     /// Adds a node, refusing an id that is already in the model.
@@ -669,6 +916,101 @@ impl Model {
         Ok(())
     }
 
+    /// Adds a load case, refusing a duplicate id.
+    pub fn add_load_case(&mut self, case: LoadCase) -> Result<(), ModelError> {
+        if self
+            .load_cases
+            .iter()
+            .any(|existing| existing.id == case.id)
+        {
+            return Err(ModelError::DuplicateLoadCase { id: case.id });
+        }
+        self.load_cases.push(case);
+        Ok(())
+    }
+
+    /// Adds a load, refusing an unknown case, target or non-finite value.
+    pub fn add_load(&mut self, load: Load) -> Result<(), ModelError> {
+        let case = load.case();
+        if !self.load_cases.iter().any(|existing| existing.id == case) {
+            return Err(ModelError::UnknownLoadCase { case });
+        }
+        if !load.is_finite() {
+            return Err(ModelError::NonFiniteLoad { case });
+        }
+        match load {
+            Load::Nodal { load, .. } => {
+                if !self.nodes.iter().any(|node| node.id == load.node) {
+                    return Err(ModelError::UnknownLoadNode {
+                        case,
+                        node: load.node,
+                    });
+                }
+            }
+            Load::Member { load, .. } => {
+                if !self.members.iter().any(|member| member.id == load.member) {
+                    return Err(ModelError::UnknownLoadMember {
+                        case,
+                        member: load.member,
+                    });
+                }
+            }
+            Load::Area { load, .. } => {
+                if !self.areas.iter().any(|area| area.id == load.area) {
+                    return Err(ModelError::UnknownLoadArea {
+                        case,
+                        area: load.area,
+                    });
+                }
+            }
+            Load::Patch { load, .. } => {
+                if !self.patches.iter().any(|patch| patch.id == load.patch) {
+                    return Err(ModelError::UnknownLoadPatch {
+                        case,
+                        patch: load.patch,
+                    });
+                }
+            }
+        }
+        self.loads.push(load);
+        Ok(())
+    }
+
+    /// Adds a combination, refusing a duplicate id or a bad case factor.
+    pub fn add_combination(&mut self, combination: Combination) -> Result<(), ModelError> {
+        if self
+            .combinations
+            .iter()
+            .any(|existing| existing.id == combination.id)
+        {
+            return Err(ModelError::DuplicateCombination { id: combination.id });
+        }
+        let mut seen: Vec<LoadCaseId> = Vec::new();
+        for &(case, factor) in &combination.factors {
+            if !factor.is_finite() {
+                return Err(ModelError::NonFiniteCombinationFactor {
+                    combination: combination.id,
+                    case,
+                });
+            }
+            if seen.contains(&case) {
+                return Err(ModelError::DuplicateCombinationCase {
+                    combination: combination.id,
+                    case,
+                });
+            }
+            seen.push(case);
+            if !self.load_cases.iter().any(|existing| existing.id == case) {
+                return Err(ModelError::UnknownCombinationCase {
+                    combination: combination.id,
+                    case,
+                });
+            }
+        }
+        self.combinations.push(combination);
+        Ok(())
+    }
+
     /// Checks that every member references nodes and a section in the model.
     pub fn validate_references(&self) -> Result<(), ModelError> {
         let index = self.index();
@@ -711,6 +1053,64 @@ impl Model {
                             node: *node,
                         });
                     }
+                }
+            }
+        }
+        for load in &self.loads {
+            let case = load.case();
+            if index.load_case(case).is_none() {
+                return Err(ModelError::UnknownLoadCase { case });
+            }
+            match load {
+                Load::Nodal { load, .. } => {
+                    if index.node(load.node).is_none() {
+                        return Err(ModelError::UnknownLoadNode {
+                            case,
+                            node: load.node,
+                        });
+                    }
+                }
+                Load::Member { load, .. } => {
+                    if index.member(load.member).is_none() {
+                        return Err(ModelError::UnknownLoadMember {
+                            case,
+                            member: load.member,
+                        });
+                    }
+                }
+                Load::Area { load, .. } => {
+                    if index.area(load.area).is_none() {
+                        return Err(ModelError::UnknownLoadArea {
+                            case,
+                            area: load.area,
+                        });
+                    }
+                }
+                Load::Patch { load, .. } => {
+                    if index.patch(load.patch).is_none() {
+                        return Err(ModelError::UnknownLoadPatch {
+                            case,
+                            patch: load.patch,
+                        });
+                    }
+                }
+            }
+        }
+        for combination in &self.combinations {
+            let mut seen: Vec<LoadCaseId> = Vec::new();
+            for &(case, _) in &combination.factors {
+                if seen.contains(&case) {
+                    return Err(ModelError::DuplicateCombinationCase {
+                        combination: combination.id,
+                        case,
+                    });
+                }
+                seen.push(case);
+                if index.load_case(case).is_none() {
+                    return Err(ModelError::UnknownCombinationCase {
+                        combination: combination.id,
+                        case,
+                    });
                 }
             }
         }
@@ -770,6 +1170,37 @@ pub enum ModelError {
     PatchDegree {
         patch: PatchId,
         direction: PatchDirection,
+    },
+    /// A load case id was used twice.
+    DuplicateLoadCase { id: LoadCaseId },
+    /// A combination id was used twice.
+    DuplicateCombination { id: CombinationId },
+    /// A load references a case that is not in the model.
+    UnknownLoadCase { case: LoadCaseId },
+    /// A load references a node that is not in the model.
+    UnknownLoadNode { case: LoadCaseId, node: NodeId },
+    /// A load references a member that is not in the model.
+    UnknownLoadMember { case: LoadCaseId, member: MemberId },
+    /// A load references an area that is not in the model.
+    UnknownLoadArea { case: LoadCaseId, area: AreaId },
+    /// A load references a patch that is not in the model.
+    UnknownLoadPatch { case: LoadCaseId, patch: PatchId },
+    /// A load carries a non-finite value.
+    NonFiniteLoad { case: LoadCaseId },
+    /// A combination references a case that is not in the model.
+    UnknownCombinationCase {
+        combination: CombinationId,
+        case: LoadCaseId,
+    },
+    /// A combination factor is not finite.
+    NonFiniteCombinationFactor {
+        combination: CombinationId,
+        case: LoadCaseId,
+    },
+    /// A combination lists the same case twice.
+    DuplicateCombinationCase {
+        combination: CombinationId,
+        case: LoadCaseId,
     },
 }
 
@@ -837,6 +1268,60 @@ impl fmt::Display for ModelError {
                 patch.get(),
                 direction.as_str()
             ),
+            ModelError::DuplicateLoadCase { id } => {
+                write!(f, "duplicate load case id {}", id.get())
+            }
+            ModelError::DuplicateCombination { id } => {
+                write!(f, "duplicate combination id {}", id.get())
+            }
+            ModelError::UnknownLoadCase { case } => {
+                write!(f, "load references unknown case {}", case.get())
+            }
+            ModelError::UnknownLoadNode { case, node } => write!(
+                f,
+                "case {} references unknown load node {}",
+                case.get(),
+                node.get()
+            ),
+            ModelError::UnknownLoadMember { case, member } => write!(
+                f,
+                "case {} references unknown load member {}",
+                case.get(),
+                member.get()
+            ),
+            ModelError::UnknownLoadArea { case, area } => write!(
+                f,
+                "case {} references unknown load area {}",
+                case.get(),
+                area.get()
+            ),
+            ModelError::UnknownLoadPatch { case, patch } => write!(
+                f,
+                "case {} references unknown load patch {}",
+                case.get(),
+                patch.get()
+            ),
+            ModelError::NonFiniteLoad { case } => {
+                write!(f, "case {} has a non-finite load value", case.get())
+            }
+            ModelError::UnknownCombinationCase { combination, case } => write!(
+                f,
+                "combination {} references unknown case {}",
+                combination.get(),
+                case.get()
+            ),
+            ModelError::NonFiniteCombinationFactor { combination, case } => write!(
+                f,
+                "combination {} has a non-finite factor for case {}",
+                combination.get(),
+                case.get()
+            ),
+            ModelError::DuplicateCombinationCase { combination, case } => write!(
+                f,
+                "combination {} lists case {} twice",
+                combination.get(),
+                case.get()
+            ),
         }
     }
 }
@@ -855,6 +1340,8 @@ pub struct ModelIndex {
     members: HashMap<MemberId, usize>,
     areas: HashMap<AreaId, usize>,
     patches: HashMap<PatchId, usize>,
+    load_cases: HashMap<LoadCaseId, usize>,
+    combinations: HashMap<CombinationId, usize>,
 }
 
 impl ModelIndex {
@@ -884,6 +1371,14 @@ impl ModelIndex {
         for (position, patch) in model.patches().iter().enumerate() {
             let inserted = index.patches.insert(patch.id, position);
             debug_assert!(inserted.is_none(), "duplicate patch id in model");
+        }
+        for (position, case) in model.load_cases().iter().enumerate() {
+            let inserted = index.load_cases.insert(case.id, position);
+            debug_assert!(inserted.is_none(), "duplicate load case id in model");
+        }
+        for (position, combination) in model.combinations().iter().enumerate() {
+            let inserted = index.combinations.insert(combination.id, position);
+            debug_assert!(inserted.is_none(), "duplicate combination id in model");
         }
         index
     }
@@ -917,6 +1412,16 @@ impl ModelIndex {
     pub fn patch(&self, id: PatchId) -> Option<usize> {
         self.patches.get(&id).copied()
     }
+
+    /// Position of a load case id in `Model::load_cases`.
+    pub fn load_case(&self, id: LoadCaseId) -> Option<usize> {
+        self.load_cases.get(&id).copied()
+    }
+
+    /// Position of a combination id in `Model::combinations`.
+    pub fn combination(&self, id: CombinationId) -> Option<usize> {
+        self.combinations.get(&id).copied()
+    }
 }
 
 #[cfg(test)]
@@ -927,7 +1432,7 @@ mod tests {
         (got - want).abs() <= 1.0e-12 * want.abs().max(1.0)
     }
 
-    fn sample_model() -> Model {
+    fn nodes_only() -> Model {
         let mut model = Model::new();
         model
             .add_node(Node::new(NodeId::new(7), 1.0, 2.0, 3.0))
@@ -941,6 +1446,11 @@ mod tests {
         model
             .add_node(Node::new(NodeId::new(12), 3.0, 0.0, 0.0))
             .unwrap();
+        model
+    }
+
+    fn with_material_section() -> Model {
+        let mut model = nodes_only();
         model
             .add_material(Material::from_mpa(
                 MaterialId::new(2),
@@ -962,6 +1472,11 @@ mod tests {
             ))
             .unwrap();
         model
+    }
+
+    fn with_member() -> Model {
+        let mut model = with_material_section();
+        model
             .add_member(Member::new(
                 MemberId::new(4),
                 NodeId::new(7),
@@ -971,6 +1486,11 @@ mod tests {
                 ElementKind::Frame,
             ))
             .unwrap();
+        model
+    }
+
+    fn full_model() -> Model {
+        let mut model = with_member();
         model
             .add_area(Area::new(
                 AreaId::new(5),
@@ -997,6 +1517,22 @@ mod tests {
             ))
             .unwrap();
         model
+            .add_load_case(LoadCase::new(LoadCaseId::new(10), "LC1"))
+            .unwrap();
+        model
+            .add_load(Load::Nodal {
+                case: LoadCaseId::new(10),
+                load: NodalLoad::new(NodeId::new(7), [1.0, 0.0, 0.0], [0.0; 3]),
+            })
+            .unwrap();
+        model
+            .add_combination(Combination::new(
+                CombinationId::new(13),
+                "ULS",
+                vec![(LoadCaseId::new(10), 1.35)],
+            ))
+            .unwrap();
+        model
     }
 
     #[test]
@@ -1007,11 +1543,13 @@ mod tests {
         assert_eq!(MemberId::new(14).get(), 14);
         assert_eq!(AreaId::new(15).get(), 15);
         assert_eq!(PatchId::new(16).get(), 16);
+        assert_eq!(LoadCaseId::new(17).get(), 17);
+        assert_eq!(CombinationId::new(18).get(), 18);
     }
 
     #[test]
     fn index_finds_each_entity_by_id() {
-        let model = sample_model();
+        let model = full_model();
         let index = model.index();
 
         assert_eq!(index.node(NodeId::new(7)), Some(0));
@@ -1021,22 +1559,26 @@ mod tests {
         assert_eq!(index.member(MemberId::new(4)), Some(0));
         assert_eq!(index.area(AreaId::new(5)), Some(0));
         assert_eq!(index.patch(PatchId::new(6)), Some(0));
+        assert_eq!(index.load_case(LoadCaseId::new(10)), Some(0));
+        assert_eq!(index.combination(CombinationId::new(13)), Some(0));
     }
 
     #[test]
     fn index_returns_none_for_an_unknown_id() {
-        let index = sample_model().index();
+        let index = full_model().index();
         assert_eq!(index.node(NodeId::new(99)), None);
         assert_eq!(index.material(MaterialId::new(99)), None);
         assert_eq!(index.section(SectionId::new(99)), None);
         assert_eq!(index.member(MemberId::new(99)), None);
         assert_eq!(index.area(AreaId::new(99)), None);
         assert_eq!(index.patch(PatchId::new(99)), None);
+        assert_eq!(index.load_case(LoadCaseId::new(99)), None);
+        assert_eq!(index.combination(CombinationId::new(99)), None);
     }
 
     #[test]
     fn duplicate_ids_are_rejected_at_insertion() {
-        let mut model = sample_model();
+        let mut model = full_model();
 
         assert_eq!(
             model.add_node(Node::new(NodeId::new(7), 4.0, 5.0, 6.0)),
@@ -1125,7 +1667,15 @@ mod tests {
 
     #[test]
     fn section_table_values_convert_once() {
-        let section = sample_model().sections()[0].clone();
+        let section = Section::from_tables(
+            SectionId::new(9),
+            "test",
+            1.0e6,
+            1.0e12,
+            5.0e11,
+            2.0e11,
+            3.0e18,
+        );
         assert!(close(section.area, 1.0));
         assert!(close(section.inertia_y, 1.0));
         assert!(close(section.inertia_z, 5.0e-1));
@@ -1135,8 +1685,7 @@ mod tests {
 
     #[test]
     fn material_modulus_converts_from_mpa() {
-        let model = sample_model();
-        let material = &model.materials()[0];
+        let material = Material::from_mpa(MaterialId::new(2), "S355", 7850.0, 210_000.0, 0.3);
         assert!(close(material.elastic_modulus, 210_000_000.0));
         assert!(close(material.density, 7850.0));
         assert_eq!(material.name, "S355");
@@ -1153,12 +1702,12 @@ mod tests {
 
     #[test]
     fn a_valid_member_passes_reference_validation() {
-        assert_eq!(sample_model().validate_references(), Ok(()));
+        assert_eq!(with_member().validate_references(), Ok(()));
     }
 
     #[test]
     fn missing_node_reference_is_rejected() {
-        let mut model = sample_model();
+        let mut model = with_material_section();
         let member = Member::new(
             MemberId::new(5),
             NodeId::new(7),
@@ -1178,7 +1727,7 @@ mod tests {
 
     #[test]
     fn missing_section_reference_is_rejected() {
-        let mut model = sample_model();
+        let mut model = with_material_section();
         let member = Member::new(
             MemberId::new(5),
             NodeId::new(7),
@@ -1216,7 +1765,7 @@ mod tests {
 
     #[test]
     fn area_reference_is_checked() {
-        let mut model = sample_model();
+        let mut model = nodes_only();
         let area = Area::new(
             AreaId::new(8),
             [
@@ -1238,7 +1787,7 @@ mod tests {
 
     #[test]
     fn patch_reference_is_checked() {
-        let mut model = sample_model();
+        let mut model = nodes_only();
         let patch = SplinePatch::unweighted(
             PatchId::new(8),
             1,
@@ -1261,7 +1810,7 @@ mod tests {
 
     #[test]
     fn patch_with_ragged_net_is_rejected() {
-        let mut model = sample_model();
+        let mut model = nodes_only();
         let patch = SplinePatch::unweighted(
             PatchId::new(8),
             1,
@@ -1280,7 +1829,7 @@ mod tests {
 
     #[test]
     fn patch_with_wrong_knot_count_is_rejected() {
-        let mut model = sample_model();
+        let mut model = nodes_only();
         let patch = SplinePatch::unweighted(
             PatchId::new(8),
             1,
@@ -1303,7 +1852,7 @@ mod tests {
 
     #[test]
     fn patch_with_unclamped_knots_is_rejected() {
-        let mut model = sample_model();
+        let mut model = nodes_only();
         let patch = SplinePatch::unweighted(
             PatchId::new(8),
             1,
@@ -1350,5 +1899,144 @@ mod tests {
     fn patch_direction_has_a_stable_spelling() {
         assert_eq!(PatchDirection::U.as_str(), "u");
         assert_eq!(PatchDirection::V.as_str(), "v");
+    }
+
+    #[test]
+    fn load_case_self_weight_is_explicit() {
+        let plain = LoadCase::new(LoadCaseId::new(1), "D");
+        let weighted = LoadCase::new(LoadCaseId::new(2), "SW").with_self_weight();
+        assert!(!plain.self_weight);
+        assert!(weighted.self_weight);
+        assert_eq!(plain.name, "D");
+    }
+
+    #[test]
+    fn full_model_load_references_validate() {
+        assert_eq!(full_model().validate_references(), Ok(()));
+    }
+
+    #[test]
+    fn load_without_case_is_rejected() {
+        let mut model = nodes_only();
+        let load = Load::Nodal {
+            case: LoadCaseId::new(10),
+            load: NodalLoad::new(NodeId::new(7), [1.0; 3], [0.0; 3]),
+        };
+        assert_eq!(
+            model.add_load(load),
+            Err(ModelError::UnknownLoadCase {
+                case: LoadCaseId::new(10)
+            })
+        );
+    }
+
+    #[test]
+    fn load_targets_are_checked() {
+        let mut model = with_material_section();
+        model
+            .add_load_case(LoadCase::new(LoadCaseId::new(10), "LC"))
+            .unwrap();
+        let unknown_node = Load::Nodal {
+            case: LoadCaseId::new(10),
+            load: NodalLoad::new(NodeId::new(99), [1.0; 3], [0.0; 3]),
+        };
+        assert_eq!(
+            model.add_load(unknown_node),
+            Err(ModelError::UnknownLoadNode {
+                case: LoadCaseId::new(10),
+                node: NodeId::new(99),
+            })
+        );
+
+        let unknown_member = Load::Member {
+            case: LoadCaseId::new(10),
+            load: MemberLoad::new(MemberId::new(99), [1.0; 3], [0.0; 3]),
+        };
+        assert_eq!(
+            model.add_load(unknown_member),
+            Err(ModelError::UnknownLoadMember {
+                case: LoadCaseId::new(10),
+                member: MemberId::new(99),
+            })
+        );
+    }
+
+    #[test]
+    fn non_finite_load_is_rejected() {
+        let mut model = nodes_only();
+        model
+            .add_load_case(LoadCase::new(LoadCaseId::new(10), "LC"))
+            .unwrap();
+        let load = Load::Nodal {
+            case: LoadCaseId::new(10),
+            load: NodalLoad::new(NodeId::new(7), [Real::NAN, 0.0, 0.0], [0.0; 3]),
+        };
+        assert_eq!(
+            model.add_load(load),
+            Err(ModelError::NonFiniteLoad {
+                case: LoadCaseId::new(10)
+            })
+        );
+    }
+
+    #[test]
+    fn combination_case_and_factor_are_checked() {
+        let mut model = with_material_section();
+        model
+            .add_load_case(LoadCase::new(LoadCaseId::new(10), "LC"))
+            .unwrap();
+        let unknown = Combination::new(
+            CombinationId::new(13),
+            "ULS",
+            vec![(LoadCaseId::new(99), 1.0)],
+        );
+        assert_eq!(
+            model.add_combination(unknown),
+            Err(ModelError::UnknownCombinationCase {
+                combination: CombinationId::new(13),
+                case: LoadCaseId::new(99),
+            })
+        );
+        let non_finite = Combination::new(
+            CombinationId::new(13),
+            "ULS",
+            vec![(LoadCaseId::new(10), Real::INFINITY)],
+        );
+        assert_eq!(
+            model.add_combination(non_finite),
+            Err(ModelError::NonFiniteCombinationFactor {
+                combination: CombinationId::new(13),
+                case: LoadCaseId::new(10),
+            })
+        );
+        let repeated = Combination::new(
+            CombinationId::new(13),
+            "ULS",
+            vec![(LoadCaseId::new(10), 1.0), (LoadCaseId::new(10), 1.0)],
+        );
+        assert_eq!(
+            model.add_combination(repeated),
+            Err(ModelError::DuplicateCombinationCase {
+                combination: CombinationId::new(13),
+                case: LoadCaseId::new(10),
+            })
+        );
+    }
+
+    #[test]
+    fn duplicate_load_case_and_combination_ids_are_rejected() {
+        let mut model = full_model();
+        assert_eq!(
+            model.add_load_case(LoadCase::new(LoadCaseId::new(10), "again")),
+            Err(ModelError::DuplicateLoadCase {
+                id: LoadCaseId::new(10)
+            })
+        );
+        assert_eq!(
+            model.add_combination(Combination::new(CombinationId::new(13), "again", vec![])),
+            Err(ModelError::DuplicateCombination {
+                id: CombinationId::new(13)
+            })
+        );
     }
 }

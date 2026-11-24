@@ -24,6 +24,7 @@ pub use math::{
     renumber, BandedMatrix, Factored, Mat3, NewIndex, OldIndex, Permutation, SolveError, Vec3,
 };
 pub use model::{
-    Area, AreaId, AreaKind, ElementKind, Material, MaterialId, Member, MemberId, Model, ModelError,
-    ModelIndex, Node, NodeId, PatchDirection, PatchId, Section, SectionId, SplinePatch,
+    Area, AreaId, AreaKind, AreaLoad, Combination, CombinationId, ElementKind, Load, LoadCase,
+    LoadCaseId, Material, MaterialId, Member, MemberId, Model, ModelError, ModelIndex, NodalLoad,
+    Node, NodeId, PatchDirection, PatchId, PatchLoad, Section, SectionId, SplinePatch,
 };
