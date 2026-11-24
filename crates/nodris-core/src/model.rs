@@ -1,9 +1,10 @@
 //! Neutral model entities with stable ids.
 //!
-//! A model holds what an editor can change: nodes, materials, sections and
-//! members. None of these is an analysis element yet; elements are derived
-//! later from the same objects. Ids are `u32` values owned by the document, so
-//! a selection or a reference survives a reorder of the vectors.
+//! A model holds what an editor can change: nodes, materials, sections,
+//! members, areas and spline patches. None of these is an analysis element yet;
+//! elements are derived later from the same objects. Ids are `u32` values owned
+//! by the document, so a selection or a reference survives a reorder of the
+//! vectors.
 //!
 //! Coordinates and section properties are stored in SI. A section table that
 //! quotes mm, mm², mm⁴ or mm⁶ crosses [`crate::units`] once in `Section::from_tables`
@@ -149,6 +150,232 @@ impl Member {
             kind,
         }
     }
+}
+
+/// Stable identity of an area in the model document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AreaId(u32);
+
+impl AreaId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Stable identity of a spline patch in the model document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PatchId(u32);
+
+impl PatchId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// What a four-node area is meant to model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AreaKind {
+    /// A full shell with membrane and bending behaviour.
+    Shell,
+    /// In-plane stiffness only.
+    Membrane,
+    /// Out-of-plane bending only.
+    Plate,
+}
+
+impl AreaKind {
+    /// Stable spelling used by documents and reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            AreaKind::Shell => "shell",
+            AreaKind::Membrane => "membrane",
+            AreaKind::Plate => "plate",
+        }
+    }
+
+    /// Parses a document spelling, case-insensitively.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "shell" => Some(AreaKind::Shell),
+            "membrane" => Some(AreaKind::Membrane),
+            "plate" => Some(AreaKind::Plate),
+            _ => None,
+        }
+    }
+}
+
+/// A four-node area prepared for shell meshing.
+///
+/// The nodes are references to model nodes, so moving a node rebuilds the
+/// area geometry without changing the document object.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Area {
+    /// Stable document id.
+    pub id: AreaId,
+    /// Corner nodes in circuit order.
+    pub nodes: [NodeId; 4],
+    /// Shell, membrane or plate intent.
+    pub kind: AreaKind,
+}
+
+impl Area {
+    /// Creates an area from four corner node ids.
+    pub const fn new(id: AreaId, nodes: [NodeId; 4], kind: AreaKind) -> Self {
+        Self { id, nodes, kind }
+    }
+}
+
+/// The parametric direction a knot vector belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PatchDirection {
+    /// The direction of the control-net rows.
+    U,
+    /// The direction of the control-net columns.
+    V,
+}
+
+impl PatchDirection {
+    /// Stable single-letter spelling used in error messages.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PatchDirection::U => "u",
+            PatchDirection::V => "v",
+        }
+    }
+}
+
+/// An IGA patch defined by control-net node ids and open knot vectors.
+///
+/// The patch stores no evaluated points or basis values. Analysis rebuilds
+/// them from the knots, the control net and the weights when it meshes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplinePatch {
+    /// Stable document id.
+    pub id: PatchId,
+    /// Polynomial degree in the U direction.
+    pub degree_u: u8,
+    /// Polynomial degree in the V direction.
+    pub degree_v: u8,
+    /// Open knot vector for the control-net rows.
+    pub knots_u: Vec<Real>,
+    /// Open knot vector for the control-net columns.
+    pub knots_v: Vec<Real>,
+    /// Control-net node ids, one row per U knot span.
+    pub control_net: Vec<Vec<NodeId>>,
+    /// NURBS weights in the same shape as the control net.
+    pub weights: Vec<Vec<Real>>,
+}
+
+impl SplinePatch {
+    /// Creates a patch and checks its knot vectors and control-net shape.
+    pub fn new(
+        id: PatchId,
+        degree_u: u8,
+        degree_v: u8,
+        knots_u: Vec<Real>,
+        knots_v: Vec<Real>,
+        control_net: Vec<Vec<NodeId>>,
+        weights: Vec<Vec<Real>>,
+    ) -> Self {
+        Self {
+            id,
+            degree_u,
+            degree_v,
+            knots_u,
+            knots_v,
+            control_net,
+            weights,
+        }
+    }
+
+    /// Creates a non-rational patch with every weight set to one.
+    pub fn unweighted(
+        id: PatchId,
+        degree_u: u8,
+        degree_v: u8,
+        knots_u: Vec<Real>,
+        knots_v: Vec<Real>,
+        control_net: Vec<Vec<NodeId>>,
+    ) -> Self {
+        let weights = control_net.iter().map(|row| vec![1.0; row.len()]).collect();
+        Self::new(
+            id,
+            degree_u,
+            degree_v,
+            knots_u,
+            knots_v,
+            control_net,
+            weights,
+        )
+    }
+}
+
+fn check_knots(
+    patch: PatchId,
+    degree: u8,
+    knots: &[Real],
+    direction: PatchDirection,
+) -> Result<(), ModelError> {
+    if degree == 0 {
+        return Err(ModelError::PatchDegree { patch, direction });
+    }
+    if knots.iter().any(|knot| !knot.is_finite())
+        || knots.windows(2).any(|pair| pair[1] < pair[0])
+        || knots.last() <= knots.first()
+    {
+        return Err(ModelError::PatchKnotsInvalid { patch, direction });
+    }
+    let p = degree as usize;
+    let last = knots.len() - 1;
+    let clamped_start = knots[..=p].iter().all(|knot| *knot == knots[0]);
+    let clamped_end = knots[last - p..].iter().all(|knot| *knot == knots[last]);
+    if !clamped_start || !clamped_end {
+        return Err(ModelError::PatchKnotsNotClamped { patch, direction });
+    }
+    Ok(())
+}
+
+fn validate_patch_geometry(patch: &SplinePatch) -> Result<(), ModelError> {
+    if patch.control_net.is_empty() || patch.control_net[0].is_empty() {
+        return Err(ModelError::PatchNetShape { patch: patch.id });
+    }
+    let rows = patch.control_net.len();
+    let columns = patch.control_net[0].len();
+    if patch.control_net.iter().any(|row| row.len() != columns)
+        || patch.weights.len() != rows
+        || patch.weights.iter().any(|row| row.len() != columns)
+    {
+        return Err(ModelError::PatchNetShape { patch: patch.id });
+    }
+    if rows < patch.degree_u as usize + 1 || columns < patch.degree_v as usize + 1 {
+        return Err(ModelError::PatchNetShape { patch: patch.id });
+    }
+    if patch.knots_u.len() != rows + patch.degree_u as usize + 1 {
+        return Err(ModelError::PatchKnotCount {
+            patch: patch.id,
+            direction: PatchDirection::U,
+        });
+    }
+    if patch.knots_v.len() != columns + patch.degree_v as usize + 1 {
+        return Err(ModelError::PatchKnotCount {
+            patch: patch.id,
+            direction: PatchDirection::V,
+        });
+    }
+    check_knots(patch.id, patch.degree_u, &patch.knots_u, PatchDirection::U)?;
+    check_knots(patch.id, patch.degree_v, &patch.knots_v, PatchDirection::V)
 }
 
 /// A point in model space, in metres.
@@ -299,6 +526,8 @@ pub struct Model {
     materials: Vec<Material>,
     sections: Vec<Section>,
     members: Vec<Member>,
+    areas: Vec<Area>,
+    patches: Vec<SplinePatch>,
 }
 
 impl Model {
@@ -325,6 +554,16 @@ impl Model {
     /// All members in insertion order.
     pub fn members(&self) -> &[Member] {
         &self.members
+    }
+
+    /// All areas in insertion order.
+    pub fn areas(&self) -> &[Area] {
+        &self.areas
+    }
+
+    /// All spline patches in insertion order.
+    pub fn patches(&self) -> &[SplinePatch] {
+        &self.patches
     }
 
     /// Adds a node, refusing an id that is already in the model.
@@ -393,6 +632,43 @@ impl Model {
         Ok(())
     }
 
+    /// Adds an area, refusing a duplicate id or a missing corner node.
+    pub fn add_area(&mut self, area: Area) -> Result<(), ModelError> {
+        if self.areas.iter().any(|existing| existing.id == area.id) {
+            return Err(ModelError::DuplicateArea { id: area.id });
+        }
+        for node in area.nodes {
+            if !self.nodes.iter().any(|existing| existing.id == node) {
+                return Err(ModelError::UnknownAreaNode {
+                    area: area.id,
+                    node,
+                });
+            }
+        }
+        self.areas.push(area);
+        Ok(())
+    }
+
+    /// Adds a patch, refusing a duplicate id, a bad net or a missing node.
+    pub fn add_patch(&mut self, patch: SplinePatch) -> Result<(), ModelError> {
+        if self.patches.iter().any(|existing| existing.id == patch.id) {
+            return Err(ModelError::DuplicatePatch { id: patch.id });
+        }
+        validate_patch_geometry(&patch)?;
+        for row in &patch.control_net {
+            for node in row {
+                if !self.nodes.iter().any(|existing| existing.id == *node) {
+                    return Err(ModelError::UnknownPatchNode {
+                        patch: patch.id,
+                        node: *node,
+                    });
+                }
+            }
+        }
+        self.patches.push(patch);
+        Ok(())
+    }
+
     /// Checks that every member references nodes and a section in the model.
     pub fn validate_references(&self) -> Result<(), ModelError> {
         let index = self.index();
@@ -414,6 +690,28 @@ impl Model {
                     member: member.id,
                     section: member.section,
                 });
+            }
+        }
+        for area in &self.areas {
+            for node in area.nodes {
+                if index.node(node).is_none() {
+                    return Err(ModelError::UnknownAreaNode {
+                        area: area.id,
+                        node,
+                    });
+                }
+            }
+        }
+        for patch in &self.patches {
+            for row in &patch.control_net {
+                for node in row {
+                    if index.node(*node).is_none() {
+                        return Err(ModelError::UnknownPatchNode {
+                            patch: patch.id,
+                            node: *node,
+                        });
+                    }
+                }
             }
         }
         Ok(())
@@ -443,6 +741,36 @@ pub enum ModelError {
         member: MemberId,
         section: SectionId,
     },
+    /// An area id was used twice.
+    DuplicateArea { id: AreaId },
+    /// A spline patch id was used twice.
+    DuplicatePatch { id: PatchId },
+    /// An area references a node that is not in the model.
+    UnknownAreaNode { area: AreaId, node: NodeId },
+    /// A patch references a node that is not in the model.
+    UnknownPatchNode { patch: PatchId, node: NodeId },
+    /// A patch control net or weight net is not rectangular.
+    PatchNetShape { patch: PatchId },
+    /// A knot vector does not match its control-net dimension.
+    PatchKnotCount {
+        patch: PatchId,
+        direction: PatchDirection,
+    },
+    /// A knot vector holds a non-finite or decreasing value.
+    PatchKnotsInvalid {
+        patch: PatchId,
+        direction: PatchDirection,
+    },
+    /// A knot vector is not open at both ends.
+    PatchKnotsNotClamped {
+        patch: PatchId,
+        direction: PatchDirection,
+    },
+    /// A patch degree is zero.
+    PatchDegree {
+        patch: PatchId,
+        direction: PatchDirection,
+    },
 }
 
 impl fmt::Display for ModelError {
@@ -468,6 +796,47 @@ impl fmt::Display for ModelError {
                 member.get(),
                 section.get()
             ),
+            ModelError::DuplicateArea { id } => write!(f, "duplicate area id {}", id.get()),
+            ModelError::DuplicatePatch { id } => write!(f, "duplicate patch id {}", id.get()),
+            ModelError::UnknownAreaNode { area, node } => write!(
+                f,
+                "area {} references unknown node {}",
+                area.get(),
+                node.get()
+            ),
+            ModelError::UnknownPatchNode { patch, node } => write!(
+                f,
+                "patch {} references unknown node {}",
+                patch.get(),
+                node.get()
+            ),
+            ModelError::PatchNetShape { patch } => {
+                write!(f, "patch {} has a non-rectangular net", patch.get())
+            }
+            ModelError::PatchKnotCount { patch, direction } => write!(
+                f,
+                "patch {} has a wrong {} knot count",
+                patch.get(),
+                direction.as_str()
+            ),
+            ModelError::PatchKnotsInvalid { patch, direction } => write!(
+                f,
+                "patch {} has an invalid {} knot vector",
+                patch.get(),
+                direction.as_str()
+            ),
+            ModelError::PatchKnotsNotClamped { patch, direction } => write!(
+                f,
+                "patch {} has an unclamped {} knot vector",
+                patch.get(),
+                direction.as_str()
+            ),
+            ModelError::PatchDegree { patch, direction } => write!(
+                f,
+                "patch {} has zero degree in {}",
+                patch.get(),
+                direction.as_str()
+            ),
         }
     }
 }
@@ -484,6 +853,8 @@ pub struct ModelIndex {
     materials: HashMap<MaterialId, usize>,
     sections: HashMap<SectionId, usize>,
     members: HashMap<MemberId, usize>,
+    areas: HashMap<AreaId, usize>,
+    patches: HashMap<PatchId, usize>,
 }
 
 impl ModelIndex {
@@ -505,6 +876,14 @@ impl ModelIndex {
         for (position, member) in model.members().iter().enumerate() {
             let inserted = index.members.insert(member.id, position);
             debug_assert!(inserted.is_none(), "duplicate member id in model");
+        }
+        for (position, area) in model.areas().iter().enumerate() {
+            let inserted = index.areas.insert(area.id, position);
+            debug_assert!(inserted.is_none(), "duplicate area id in model");
+        }
+        for (position, patch) in model.patches().iter().enumerate() {
+            let inserted = index.patches.insert(patch.id, position);
+            debug_assert!(inserted.is_none(), "duplicate patch id in model");
         }
         index
     }
@@ -528,6 +907,16 @@ impl ModelIndex {
     pub fn member(&self, id: MemberId) -> Option<usize> {
         self.members.get(&id).copied()
     }
+
+    /// Position of an area id in `Model::areas`.
+    pub fn area(&self, id: AreaId) -> Option<usize> {
+        self.areas.get(&id).copied()
+    }
+
+    /// Position of a patch id in `Model::patches`.
+    pub fn patch(&self, id: PatchId) -> Option<usize> {
+        self.patches.get(&id).copied()
+    }
 }
 
 #[cfg(test)]
@@ -545,6 +934,12 @@ mod tests {
             .unwrap();
         model
             .add_node(Node::new(NodeId::new(3), 0.0, 0.0, 0.0))
+            .unwrap();
+        model
+            .add_node(Node::new(NodeId::new(11), 2.0, 0.0, 0.0))
+            .unwrap();
+        model
+            .add_node(Node::new(NodeId::new(12), 3.0, 0.0, 0.0))
             .unwrap();
         model
             .add_material(Material::from_mpa(
@@ -577,6 +972,31 @@ mod tests {
             ))
             .unwrap();
         model
+            .add_area(Area::new(
+                AreaId::new(5),
+                [
+                    NodeId::new(7),
+                    NodeId::new(3),
+                    NodeId::new(11),
+                    NodeId::new(12),
+                ],
+                AreaKind::Shell,
+            ))
+            .unwrap();
+        model
+            .add_patch(SplinePatch::unweighted(
+                PatchId::new(6),
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![
+                    vec![NodeId::new(7), NodeId::new(3)],
+                    vec![NodeId::new(11), NodeId::new(12)],
+                ],
+            ))
+            .unwrap();
+        model
     }
 
     #[test]
@@ -585,6 +1005,8 @@ mod tests {
         assert_eq!(MaterialId::new(12).get(), 12);
         assert_eq!(SectionId::new(13).get(), 13);
         assert_eq!(MemberId::new(14).get(), 14);
+        assert_eq!(AreaId::new(15).get(), 15);
+        assert_eq!(PatchId::new(16).get(), 16);
     }
 
     #[test]
@@ -597,6 +1019,8 @@ mod tests {
         assert_eq!(index.material(MaterialId::new(2)), Some(0));
         assert_eq!(index.section(SectionId::new(9)), Some(0));
         assert_eq!(index.member(MemberId::new(4)), Some(0));
+        assert_eq!(index.area(AreaId::new(5)), Some(0));
+        assert_eq!(index.patch(PatchId::new(6)), Some(0));
     }
 
     #[test]
@@ -606,6 +1030,8 @@ mod tests {
         assert_eq!(index.material(MaterialId::new(99)), None);
         assert_eq!(index.section(SectionId::new(99)), None);
         assert_eq!(index.member(MemberId::new(99)), None);
+        assert_eq!(index.area(AreaId::new(99)), None);
+        assert_eq!(index.patch(PatchId::new(99)), None);
     }
 
     #[test]
@@ -654,6 +1080,37 @@ mod tests {
             model.add_member(duplicate),
             Err(ModelError::DuplicateMember {
                 id: MemberId::new(4)
+            })
+        );
+        let duplicate_area = Area::new(
+            AreaId::new(5),
+            [
+                NodeId::new(7),
+                NodeId::new(3),
+                NodeId::new(11),
+                NodeId::new(12),
+            ],
+            AreaKind::Plate,
+        );
+        assert_eq!(
+            model.add_area(duplicate_area),
+            Err(ModelError::DuplicateArea { id: AreaId::new(5) })
+        );
+        let duplicate_patch = SplinePatch::unweighted(
+            PatchId::new(6),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![
+                vec![NodeId::new(7), NodeId::new(3)],
+                vec![NodeId::new(11), NodeId::new(12)],
+            ],
+        );
+        assert_eq!(
+            model.add_patch(duplicate_patch),
+            Err(ModelError::DuplicatePatch {
+                id: PatchId::new(6)
             })
         );
     }
@@ -746,5 +1203,152 @@ mod tests {
             node: NodeId::new(99),
         };
         assert_eq!(error.to_string(), "member 5 references unknown node 99");
+    }
+
+    #[test]
+    fn area_kind_spellings_round_trip() {
+        for kind in [AreaKind::Shell, AreaKind::Membrane, AreaKind::Plate] {
+            assert_eq!(AreaKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(AreaKind::parse(" SHELL "), Some(AreaKind::Shell));
+        assert_eq!(AreaKind::parse("solid"), None);
+    }
+
+    #[test]
+    fn area_reference_is_checked() {
+        let mut model = sample_model();
+        let area = Area::new(
+            AreaId::new(8),
+            [
+                NodeId::new(7),
+                NodeId::new(3),
+                NodeId::new(11),
+                NodeId::new(99),
+            ],
+            AreaKind::Membrane,
+        );
+        assert_eq!(
+            model.add_area(area),
+            Err(ModelError::UnknownAreaNode {
+                area: AreaId::new(8),
+                node: NodeId::new(99),
+            })
+        );
+    }
+
+    #[test]
+    fn patch_reference_is_checked() {
+        let mut model = sample_model();
+        let patch = SplinePatch::unweighted(
+            PatchId::new(8),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![
+                vec![NodeId::new(7), NodeId::new(99)],
+                vec![NodeId::new(11), NodeId::new(12)],
+            ],
+        );
+        assert_eq!(
+            model.add_patch(patch),
+            Err(ModelError::UnknownPatchNode {
+                patch: PatchId::new(8),
+                node: NodeId::new(99),
+            })
+        );
+    }
+
+    #[test]
+    fn patch_with_ragged_net_is_rejected() {
+        let mut model = sample_model();
+        let patch = SplinePatch::unweighted(
+            PatchId::new(8),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![vec![NodeId::new(7), NodeId::new(3)], vec![NodeId::new(11)]],
+        );
+        assert_eq!(
+            model.add_patch(patch),
+            Err(ModelError::PatchNetShape {
+                patch: PatchId::new(8)
+            })
+        );
+    }
+
+    #[test]
+    fn patch_with_wrong_knot_count_is_rejected() {
+        let mut model = sample_model();
+        let patch = SplinePatch::unweighted(
+            PatchId::new(8),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![
+                vec![NodeId::new(7), NodeId::new(3)],
+                vec![NodeId::new(11), NodeId::new(12)],
+            ],
+        );
+        assert_eq!(
+            model.add_patch(patch),
+            Err(ModelError::PatchKnotCount {
+                patch: PatchId::new(8),
+                direction: PatchDirection::U,
+            })
+        );
+    }
+
+    #[test]
+    fn patch_with_unclamped_knots_is_rejected() {
+        let mut model = sample_model();
+        let patch = SplinePatch::unweighted(
+            PatchId::new(8),
+            1,
+            1,
+            vec![0.0, 0.5, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![
+                vec![NodeId::new(7), NodeId::new(3)],
+                vec![NodeId::new(11), NodeId::new(12)],
+            ],
+        );
+        assert_eq!(
+            model.add_patch(patch),
+            Err(ModelError::PatchKnotsNotClamped {
+                patch: PatchId::new(8),
+                direction: PatchDirection::U,
+            })
+        );
+    }
+
+    #[test]
+    fn patch_weight_shape_is_checked() {
+        let patch = SplinePatch::new(
+            PatchId::new(8),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![
+                vec![NodeId::new(7), NodeId::new(3)],
+                vec![NodeId::new(11), NodeId::new(12)],
+            ],
+            vec![vec![1.0, 1.0]],
+        );
+        assert_eq!(
+            validate_patch_geometry(&patch),
+            Err(ModelError::PatchNetShape {
+                patch: PatchId::new(8)
+            })
+        );
+    }
+
+    #[test]
+    fn patch_direction_has_a_stable_spelling() {
+        assert_eq!(PatchDirection::U.as_str(), "u");
+        assert_eq!(PatchDirection::V.as_str(), "v");
     }
 }
