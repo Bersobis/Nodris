@@ -1,9 +1,9 @@
 //! Neutral model entities with stable ids.
 //!
-//! A model holds what an editor can change: nodes, materials and sections.
-//! None of these is an analysis element yet; elements are derived later from
-//! the same objects. Ids are `u32` values owned by the document, so a selection
-//! or a reference survives a reorder of the vectors.
+//! A model holds what an editor can change: nodes, materials, sections and
+//! members. None of these is an analysis element yet; elements are derived
+//! later from the same objects. Ids are `u32` values owned by the document, so
+//! a selection or a reference survives a reorder of the vectors.
 //!
 //! Coordinates and section properties are stored in SI. A section table that
 //! quotes mm, mm², mm⁴ or mm⁶ crosses [`crate::units`] once in `Section::from_tables`
@@ -60,6 +60,94 @@ impl SectionId {
     /// The underlying document id.
     pub const fn get(self) -> u32 {
         self.0
+    }
+}
+
+/// Stable identity of a member in the model document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MemberId(u32);
+
+impl MemberId {
+    /// Wraps a document id.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// The underlying document id.
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// What a member is meant to do in the structure.
+///
+/// This is user intent, not a formulation. Analysis chooses an element
+/// implementation later from the same member and section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementKind {
+    /// A member that carries axial force, shear, bending and torsion.
+    Frame,
+    /// A member that carries axial force only.
+    Truss,
+}
+
+impl ElementKind {
+    /// Stable spelling used by documents and reports.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ElementKind::Frame => "frame",
+            ElementKind::Truss => "truss",
+        }
+    }
+
+    /// Parses a document spelling, case-insensitively.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "frame" => Some(ElementKind::Frame),
+            "truss" => Some(ElementKind::Truss),
+            _ => None,
+        }
+    }
+}
+
+/// A line between two nodes, with the section and kind chosen by the user.
+///
+/// A member is intent. It holds no stiffness, no DOFs and no mesh; analysis
+/// derives those from it without rewriting the document.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Member {
+    /// Stable document id.
+    pub id: MemberId,
+    /// Node at the start of the member.
+    pub start: NodeId,
+    /// Node at the end of the member.
+    pub end: NodeId,
+    /// Section assigned to the member.
+    pub section: SectionId,
+    /// Rotation of the local axes about the member, in radians.
+    pub rotation: Real,
+    /// Frame or truss intent.
+    pub kind: ElementKind,
+}
+
+impl Member {
+    /// Creates a member from stable ids and analysis-unit rotation.
+    pub const fn new(
+        id: MemberId,
+        start: NodeId,
+        end: NodeId,
+        section: SectionId,
+        rotation: Real,
+        kind: ElementKind,
+    ) -> Self {
+        Self {
+            id,
+            start,
+            end,
+            section,
+            rotation,
+            kind,
+        }
     }
 }
 
@@ -210,6 +298,7 @@ pub struct Model {
     nodes: Vec<Node>,
     materials: Vec<Material>,
     sections: Vec<Section>,
+    members: Vec<Member>,
 }
 
 impl Model {
@@ -231,6 +320,11 @@ impl Model {
     /// All sections in insertion order.
     pub fn sections(&self) -> &[Section] {
         &self.sections
+    }
+
+    /// All members in insertion order.
+    pub fn members(&self) -> &[Member] {
+        &self.members
     }
 
     /// Adds a node, refusing an id that is already in the model.
@@ -268,6 +362,63 @@ impl Model {
         Ok(())
     }
 
+    /// Adds a member, refusing a duplicate id or a missing reference.
+    pub fn add_member(&mut self, member: Member) -> Result<(), ModelError> {
+        if self.members.iter().any(|existing| existing.id == member.id) {
+            return Err(ModelError::DuplicateMember { id: member.id });
+        }
+        if !self.nodes.iter().any(|node| node.id == member.start) {
+            return Err(ModelError::UnknownNode {
+                member: member.id,
+                node: member.start,
+            });
+        }
+        if !self.nodes.iter().any(|node| node.id == member.end) {
+            return Err(ModelError::UnknownNode {
+                member: member.id,
+                node: member.end,
+            });
+        }
+        if !self
+            .sections
+            .iter()
+            .any(|section| section.id == member.section)
+        {
+            return Err(ModelError::UnknownSection {
+                member: member.id,
+                section: member.section,
+            });
+        }
+        self.members.push(member);
+        Ok(())
+    }
+
+    /// Checks that every member references nodes and a section in the model.
+    pub fn validate_references(&self) -> Result<(), ModelError> {
+        let index = self.index();
+        for member in &self.members {
+            if index.node(member.start).is_none() {
+                return Err(ModelError::UnknownNode {
+                    member: member.id,
+                    node: member.start,
+                });
+            }
+            if index.node(member.end).is_none() {
+                return Err(ModelError::UnknownNode {
+                    member: member.id,
+                    node: member.end,
+                });
+            }
+            if index.section(member.section).is_none() {
+                return Err(ModelError::UnknownSection {
+                    member: member.id,
+                    section: member.section,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Builds the id-to-position lookup for the current contents.
     pub fn index(&self) -> ModelIndex {
         ModelIndex::build(self)
@@ -283,6 +434,15 @@ pub enum ModelError {
     DuplicateMaterial { id: MaterialId },
     /// A section id was used twice.
     DuplicateSection { id: SectionId },
+    /// A member id was used twice.
+    DuplicateMember { id: MemberId },
+    /// A member references a node that is not in the model.
+    UnknownNode { member: MemberId, node: NodeId },
+    /// A member references a section that is not in the model.
+    UnknownSection {
+        member: MemberId,
+        section: SectionId,
+    },
 }
 
 impl fmt::Display for ModelError {
@@ -295,6 +455,19 @@ impl fmt::Display for ModelError {
             ModelError::DuplicateSection { id } => {
                 write!(f, "duplicate section id {}", id.get())
             }
+            ModelError::DuplicateMember { id } => write!(f, "duplicate member id {}", id.get()),
+            ModelError::UnknownNode { member, node } => write!(
+                f,
+                "member {} references unknown node {}",
+                member.get(),
+                node.get()
+            ),
+            ModelError::UnknownSection { member, section } => write!(
+                f,
+                "member {} references unknown section {}",
+                member.get(),
+                section.get()
+            ),
         }
     }
 }
@@ -310,6 +483,7 @@ pub struct ModelIndex {
     nodes: HashMap<NodeId, usize>,
     materials: HashMap<MaterialId, usize>,
     sections: HashMap<SectionId, usize>,
+    members: HashMap<MemberId, usize>,
 }
 
 impl ModelIndex {
@@ -328,6 +502,10 @@ impl ModelIndex {
             let inserted = index.sections.insert(section.id, position);
             debug_assert!(inserted.is_none(), "duplicate section id in model");
         }
+        for (position, member) in model.members().iter().enumerate() {
+            let inserted = index.members.insert(member.id, position);
+            debug_assert!(inserted.is_none(), "duplicate member id in model");
+        }
         index
     }
 
@@ -344,6 +522,11 @@ impl ModelIndex {
     /// Position of a section id in `Model::sections`.
     pub fn section(&self, id: SectionId) -> Option<usize> {
         self.sections.get(&id).copied()
+    }
+
+    /// Position of a member id in `Model::members`.
+    pub fn member(&self, id: MemberId) -> Option<usize> {
+        self.members.get(&id).copied()
     }
 }
 
@@ -384,6 +567,16 @@ mod tests {
             ))
             .unwrap();
         model
+            .add_member(Member::new(
+                MemberId::new(4),
+                NodeId::new(7),
+                NodeId::new(3),
+                SectionId::new(9),
+                0.0,
+                ElementKind::Frame,
+            ))
+            .unwrap();
+        model
     }
 
     #[test]
@@ -391,6 +584,7 @@ mod tests {
         assert_eq!(NodeId::new(11).get(), 11);
         assert_eq!(MaterialId::new(12).get(), 12);
         assert_eq!(SectionId::new(13).get(), 13);
+        assert_eq!(MemberId::new(14).get(), 14);
     }
 
     #[test]
@@ -402,6 +596,7 @@ mod tests {
         assert_eq!(index.node(NodeId::new(3)), Some(1));
         assert_eq!(index.material(MaterialId::new(2)), Some(0));
         assert_eq!(index.section(SectionId::new(9)), Some(0));
+        assert_eq!(index.member(MemberId::new(4)), Some(0));
     }
 
     #[test]
@@ -410,6 +605,7 @@ mod tests {
         assert_eq!(index.node(NodeId::new(99)), None);
         assert_eq!(index.material(MaterialId::new(99)), None);
         assert_eq!(index.section(SectionId::new(99)), None);
+        assert_eq!(index.member(MemberId::new(99)), None);
     }
 
     #[test]
@@ -446,6 +642,20 @@ mod tests {
                 id: SectionId::new(9)
             })
         );
+        let duplicate = Member::new(
+            MemberId::new(4),
+            NodeId::new(7),
+            NodeId::new(3),
+            SectionId::new(9),
+            0.0,
+            ElementKind::Truss,
+        );
+        assert_eq!(
+            model.add_member(duplicate),
+            Err(ModelError::DuplicateMember {
+                id: MemberId::new(4)
+            })
+        );
     }
 
     #[test]
@@ -473,5 +683,68 @@ mod tests {
         assert!(close(material.elastic_modulus, 210_000_000.0));
         assert!(close(material.density, 7850.0));
         assert_eq!(material.name, "S355");
+    }
+
+    #[test]
+    fn element_kind_spellings_round_trip() {
+        for kind in [ElementKind::Frame, ElementKind::Truss] {
+            assert_eq!(ElementKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(ElementKind::parse(" FRAME "), Some(ElementKind::Frame));
+        assert_eq!(ElementKind::parse("cable"), None);
+    }
+
+    #[test]
+    fn a_valid_member_passes_reference_validation() {
+        assert_eq!(sample_model().validate_references(), Ok(()));
+    }
+
+    #[test]
+    fn missing_node_reference_is_rejected() {
+        let mut model = sample_model();
+        let member = Member::new(
+            MemberId::new(5),
+            NodeId::new(7),
+            NodeId::new(99),
+            SectionId::new(9),
+            0.0,
+            ElementKind::Frame,
+        );
+        assert_eq!(
+            model.add_member(member),
+            Err(ModelError::UnknownNode {
+                member: MemberId::new(5),
+                node: NodeId::new(99),
+            })
+        );
+    }
+
+    #[test]
+    fn missing_section_reference_is_rejected() {
+        let mut model = sample_model();
+        let member = Member::new(
+            MemberId::new(5),
+            NodeId::new(7),
+            NodeId::new(3),
+            SectionId::new(99),
+            0.0,
+            ElementKind::Truss,
+        );
+        assert_eq!(
+            model.add_member(member),
+            Err(ModelError::UnknownSection {
+                member: MemberId::new(5),
+                section: SectionId::new(99),
+            })
+        );
+    }
+
+    #[test]
+    fn reference_errors_name_the_member_and_target() {
+        let error = ModelError::UnknownNode {
+            member: MemberId::new(5),
+            node: NodeId::new(99),
+        };
+        assert_eq!(error.to_string(), "member 5 references unknown node 99");
     }
 }
