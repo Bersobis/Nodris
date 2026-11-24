@@ -6,11 +6,14 @@
 //! against it.
 //!
 //! The first module is [`math`]: vectors, matrices and banded storage.
+//! [`units`] is the one place where section tables and material strengths
+//! cross into analysis units.
 //!
 //! Nodris is a rebuild of Stodola, reconstructed from a plan that numbers its
 //! commits, `P0-02` and so on. Those ids refer to the plan.
 
 pub mod math;
+pub mod units;
 
 pub use math::{
     renumber, BandedMatrix, Factored, Mat3, NewIndex, OldIndex, Permutation, SolveError, Vec3,
