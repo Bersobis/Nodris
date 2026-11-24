@@ -56,6 +56,9 @@ Run before committing code:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test --release --workspace
 ```
 
-These are the commands the CI workflow will run, with the same flags.
+These are the commands the CI workflow will run, with the same flags. The
+release test run catches behaviour that debug assertions or optimisations can
+hide.

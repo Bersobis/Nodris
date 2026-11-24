@@ -7,7 +7,8 @@
 //!
 //! The first module is [`math`]: vectors, matrices and banded storage.
 //! [`units`] is the one place where section tables and material strengths
-//! cross into analysis units.
+//! cross into analysis units. [`model`] holds the entities those values
+//! describe, with stable ids.
 //!
 //! The solver's guarantees and limits are recorded in
 //! `docs/SOLVER-GUARANTEES.md` at the workspace root.
@@ -16,8 +17,12 @@
 //! commits, `P0-02` and so on. Those ids refer to the plan.
 
 pub mod math;
+pub mod model;
 pub mod units;
 
 pub use math::{
     renumber, BandedMatrix, Factored, Mat3, NewIndex, OldIndex, Permutation, SolveError, Vec3,
+};
+pub use model::{
+    Material, MaterialId, Model, ModelError, ModelIndex, Node, NodeId, Section, SectionId,
 };

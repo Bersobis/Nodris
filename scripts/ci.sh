@@ -5,7 +5,9 @@
 #
 #     bash scripts/ci.sh
 #
-# Steps: rustfmt, cargo check, clippy with warnings denied, tests.
+# Steps: rustfmt, cargo check, clippy with warnings denied, debug tests,
+# release tests. The release run catches code that only behaves under
+# optimisations or without debug assertions.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -21,5 +23,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 echo "== tests"
 cargo test --workspace
+
+echo "== release tests"
+cargo test --release --workspace
 
 echo "all gates passed"
