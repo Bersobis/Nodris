@@ -22,7 +22,9 @@ pub mod math;
 pub mod model;
 pub mod units;
 
-pub use element::{member_dofs, node_dofs, Element, DOF_NAMES, DOF_PER_NODE};
+pub use element::{
+    local_frame_stiffness, member_dofs, node_dofs, Element, ElementError, DOF_NAMES, DOF_PER_NODE,
+};
 pub use math::{
     renumber, BandedMatrix, Factored, Mat3, NewIndex, OldIndex, Permutation, SolveError, Vec3,
 };

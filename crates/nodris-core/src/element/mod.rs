@@ -8,7 +8,43 @@
 //! translation X, Y, Z, then rotation about X, Y, Z. [`node_dofs`] is the one
 //! place that turns a node index into those global numbers.
 
+use std::fmt;
+
 use crate::math::{Mat3, Real, Vec3};
+
+mod frame3d;
+
+pub use frame3d::local_frame_stiffness;
+
+/// Invalid input to an element formulation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ElementError {
+    /// A member length must be finite and greater than zero.
+    InvalidLength { length: Real },
+    /// A rigidity must be finite and greater than zero.
+    InvalidRigidity { name: &'static str, value: Real },
+}
+
+impl fmt::Display for ElementError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidLength { length } => {
+                write!(
+                    f,
+                    "length must be finite and greater than zero, got {length}"
+                )
+            }
+            Self::InvalidRigidity { name, value } => {
+                write!(
+                    f,
+                    "{name} must be finite and greater than zero, got {value}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ElementError {}
 
 /// Number of degrees of freedom at every node.
 pub const DOF_PER_NODE: usize = 6;
