@@ -1,0 +1,10 @@
+[package]
+name = "nodris-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Model document interchange for Nodris"
+
+[dependencies]
+nodris-core = { path = "../nodris-core" }
+serde_json = "1"

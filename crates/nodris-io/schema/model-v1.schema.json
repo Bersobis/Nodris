@@ -1,0 +1,258 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nodris.local/schema/model-v1.schema.json",
+  "title": "Nodris native model document, schema version 1",
+  "description": "Contract for a Nodris model document. Strict import rejects unknown fields; permissive import keeps unknown root fields and reports every deviation. Units are kN, m, kg, with section properties in SI, as documented for nodris-core. Patch coordinates are stored in analysis units; table units are converted before writing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "nodes",
+    "materials",
+    "sections",
+    "members",
+    "areas",
+    "patches",
+    "loadCases",
+    "loads",
+    "combinations",
+    "supportDefinitions",
+    "supports",
+    "patchTies"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "nodes": { "type": "array", "items": { "$ref": "#/$defs/node" } },
+    "materials": { "type": "array", "items": { "$ref": "#/$defs/material" } },
+    "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+    "members": { "type": "array", "items": { "$ref": "#/$defs/member" } },
+    "areas": { "type": "array", "items": { "$ref": "#/$defs/area" } },
+    "patches": { "type": "array", "items": { "$ref": "#/$defs/patch" } },
+    "loadCases": { "type": "array", "items": { "$ref": "#/$defs/loadCase" } },
+    "loads": { "type": "array", "items": { "$ref": "#/$defs/load" } },
+    "combinations": { "type": "array", "items": { "$ref": "#/$defs/combination" } },
+    "supportDefinitions": { "type": "array", "items": { "$ref": "#/$defs/supportDefinition" } },
+    "supports": { "type": "array", "items": { "$ref": "#/$defs/support" } },
+    "patchTies": { "type": "array", "items": { "$ref": "#/$defs/patchTie" } }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "x", "y", "z"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" }
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "density", "elasticModulus", "poissonRatio"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "density": { "type": "number", "description": "kg/m^3" },
+        "elasticModulus": { "type": "number", "description": "kN/m^2" },
+        "poissonRatio": { "type": "number" }
+      }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "area", "inertiaY", "inertiaZ", "torsionConstant", "warpingConstant"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "area": { "type": "number", "description": "m^2" },
+        "inertiaY": { "type": "number", "description": "m^4" },
+        "inertiaZ": { "type": "number", "description": "m^4" },
+        "torsionConstant": { "type": "number", "description": "m^4" },
+        "warpingConstant": { "type": "number", "description": "m^6" }
+      }
+    },
+    "member": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "start", "end", "section", "rotation", "kind"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "section": { "type": "integer", "minimum": 0 },
+        "rotation": { "type": "number", "description": "Radians about the member axis" },
+        "kind": { "type": "string", "enum": ["frame", "truss"] }
+      }
+    },
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "nodes", "kind"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "nodes": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "kind": { "type": "string", "enum": ["shell", "membrane", "plate"] }
+      }
+    },
+    "patch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "degreeU", "degreeV", "knotsU", "knotsV", "controlNet", "weights"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "degreeU": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "degreeV": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "knotsU": { "type": "array", "minItems": 2, "items": { "type": "number" } },
+        "knotsV": { "type": "array", "minItems": 2, "items": { "type": "number" } },
+        "controlNet": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "array", "minItems": 1, "items": { "type": "integer", "minimum": 0 } }
+        },
+        "weights": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "array", "minItems": 1, "items": { "type": "number" } }
+        }
+      }
+    },
+    "loadCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "selfWeight"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "selfWeight": { "type": "boolean" }
+      }
+    },
+    "case": { "type": "integer", "minimum": 0 },
+    "vector3": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } },
+    "load": {
+      "oneOf": [
+        { "$ref": "#/$defs/nodalLoad" },
+        { "$ref": "#/$defs/memberLoad" },
+        { "$ref": "#/$defs/areaLoad" },
+        { "$ref": "#/$defs/patchLoad" }
+      ]
+    },
+    "nodalLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "type", "node", "force", "moment"],
+      "properties": {
+        "case": { "$ref": "#/$defs/case" },
+        "type": { "const": "nodal" },
+        "node": { "type": "integer", "minimum": 0 },
+        "force": { "$ref": "#/$defs/vector3" },
+        "moment": { "$ref": "#/$defs/vector3" }
+      }
+    },
+    "memberLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "type", "member", "force", "moment"],
+      "properties": {
+        "case": { "$ref": "#/$defs/case" },
+        "type": { "const": "member" },
+        "member": { "type": "integer", "minimum": 0 },
+        "force": { "$ref": "#/$defs/vector3" },
+        "moment": { "$ref": "#/$defs/vector3" }
+      }
+    },
+    "areaLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "type", "area", "pressure"],
+      "properties": {
+        "case": { "$ref": "#/$defs/case" },
+        "type": { "const": "area" },
+        "area": { "type": "integer", "minimum": 0 },
+        "pressure": { "type": "number", "description": "kN/m^2" }
+      }
+    },
+    "patchLoad": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case", "type", "patch", "pressure"],
+      "properties": {
+        "case": { "$ref": "#/$defs/case" },
+        "type": { "const": "patch" },
+        "patch": { "type": "integer", "minimum": 0 },
+        "pressure": { "type": "number", "description": "kN/m^2" }
+      }
+    },
+    "combination": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "factors"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "factors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["case", "factor"],
+            "properties": {
+              "case": { "type": "integer", "minimum": 0 },
+              "factor": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "supportDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "restraints"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "restraints": { "$ref": "#/$defs/restraints" }
+      }
+    },
+    "restraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tx", "ty", "tz", "rx", "ry", "rz"],
+      "properties": {
+        "tx": { "type": "boolean" },
+        "ty": { "type": "boolean" },
+        "tz": { "type": "boolean" },
+        "rx": { "type": "boolean" },
+        "ry": { "type": "boolean" },
+        "rz": { "type": "boolean" }
+      }
+    },
+    "support": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "definition"],
+      "properties": {
+        "node": { "type": "integer", "minimum": 0 },
+        "definition": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "patchTie": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "master", "masterEdge", "slave", "slaveEdge"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "master": { "type": "integer", "minimum": 0 },
+        "masterEdge": { "type": "string", "enum": ["xi0", "xi1", "eta0", "eta1"] },
+        "slave": { "type": "integer", "minimum": 0 },
+        "slaveEdge": { "type": "string", "enum": ["xi0", "xi1", "eta0", "eta1"] }
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/nodris-core"]
+members = ["crates/nodris-core", "crates/nodris-io"]
 
 [workspace.package]
 version = "0.1.0"

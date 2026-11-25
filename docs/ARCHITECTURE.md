@@ -25,14 +25,14 @@ stresses that reports, tables and the viewport display.
 | Crate | State | Responsibility | Why it is a separate crate |
 |---|---|---|---|
 | `nodris-core` | exists | numerical kernel, model schema, elements, analysis, results | Every other crate depends on it, so it must depend on nothing but the standard library. |
-| `nodris-io` | planned | canonical JSON, schema, migration, CSV, fingerprints | File formats and migration change on their own schedule, and the kernel should not carry them. |
+| `nodris-io` | partial | versioned model documents, published schema, strict and permissive import | File formats and migration change on their own schedule, and the kernel should not carry them. |
 | `nodris-cli` | planned | scriptable front end over the kernel | Tests can run the command line without a display. |
 | `nodris-scene` | planned | renderer-neutral scene description | The viewport can be replaced or tested without depending on analysis types. |
 | `nodris-app` | planned | commands and edits, without a UI toolkit | Both the keyboard loop and the window need the command state, so it is stored outside both. |
 | `nodris-desktop` | planned | native window over `nodris-scene` and `nodris-app` | Window and platform code is kept away from the solver. |
 
-The planned crates have no directories yet. When one is added, its row changes
-from planned to exists in the same commit.
+Crates marked planned have no directories yet. When one is added, its row
+changes from planned to exists in the same commit.
 
 ## 3. Dependency rule
 
