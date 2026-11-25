@@ -13,8 +13,10 @@ use std::fmt;
 use crate::math::{Mat3, Real, Vec3};
 
 mod frame3d;
+mod truss3d;
 
 pub use frame3d::{end_forces, local_axes, local_frame_stiffness, to_global, FrameElement};
+pub use truss3d::TrussElement;
 
 /// Invalid input to an element formulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
