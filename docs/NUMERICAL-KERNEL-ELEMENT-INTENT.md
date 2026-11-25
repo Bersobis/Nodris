@@ -136,10 +136,10 @@ and patches.
 
 ## What the contract does not cover
 
-- Only the shell membrane is implemented. The Mindlin plate bending, the
-  shell geometric stiffness and the isogeometric patch arrive in later steps
-  of Phase 4, and they reuse this degree-of-freedom order, so that ties and
-  loads can be shared between the formulations.
+- The shell carries membrane and Mindlin bending. Its geometric stiffness
+  and the isogeometric patch arrive in later steps of Phase 4, and they reuse
+  this degree-of-freedom order, so that ties and loads can be shared between
+  the formulations.
 - The assembler does not exist yet. Numbering, restraints and the deactivation
   of zero-diagonal degrees of freedom are its job.
 - Strong-axis bending and warping are not modelled. The section carries a
@@ -156,3 +156,4 @@ and patches.
 | A bar carries axial force only | `element/truss3d.rs` |
 | Mass split shared by frame and bar | `element/mod.rs` |
 | Membrane constant strain and edge traction | `element/shell4.rs` |
+| Plate moments, MITC4 shear and Navier deflection | `element/shell4.rs`, `tests/plate.rs` |

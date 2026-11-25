@@ -1,8 +1,9 @@
 //! Four-node quadrilateral shell element (24 DOF).
 //!
-//! This step adds the membrane behaviour: a bilinear isoparametric
-//! plane-stress field, integrated with 2 × 2 Gauss quadrature. Bending and the
-//! plate modes arrive in later steps.
+//! The element combines a bilinear isoparametric membrane field for `u, v`
+//! with a Mindlin–Reissner plate field for `w` and the rotations `θx, θy`.
+//! Both use 2 × 2 Gauss quadrature; the plate carries the MITC4 assumed
+//! transverse-shear field so a thin plate does not lock.
 //!
 //! The joints are projected onto a best-fit plane, so a mildly warped quad
 //! still behaves as a flat one. A joint order that gives a negative Jacobian
@@ -10,12 +11,15 @@
 //!
 //! Local DOF order at each of the four joints is `[u, v, w, θx, θy, θz]`, the
 //! same order the frame uses, so shells and patches can share degrees of
-//! freedom.
+//! freedom. The drilling rotation `θz` has no stiffness; the assembler
+//! deactivates it as it does for a truss.
 //!
 //! Sign conventions:
 //!
 //! * membrane forces `n11`, `n22` and `n12` are positive in tension, per unit
 //!   width;
+//! * bending moments `m11`, `m22` and `m12` are positive when they put the
+//!   positive 3 face in tension;
 //! * a pressure acts on the positive 3 face.
 
 use super::{Element, ElementError, InitialStress, DOF_PER_NODE};
@@ -63,6 +67,8 @@ pub struct ShellElement {
     x: [Real; 4],
     y: [Real; 4],
     dm: [[Real; 3]; 3],
+    db: [[Real; 3]; 3],
+    ds: Real,
     dofs: [usize; SHELL_DOF],
     mass: [Real; SHELL_DOF],
 }
@@ -121,12 +127,22 @@ impl ShellElement {
             return Err(ElementError::DegenerateArea);
         }
 
-        let dm = plane_stress_matrix(modulus, poisson, thickness);
+        let shear_modulus = modulus / (2.0 * (1.0 + poisson));
+        let dm = plane_stress_matrix(modulus * thickness, poisson);
+        let db = plane_stress_matrix(modulus * thickness * thickness * thickness / 12.0, poisson);
+        let ds = 5.0 / 6.0 * shear_modulus * thickness;
         let mut k_local = [0.0; SHELL_DOF * SHELL_DOF];
         for &xi in &GAUSS {
             for &eta in &GAUSS {
                 let geometry = Geometry::at(&x, &y, xi, eta);
                 add_btb(&mut k_local, &membrane_b(&geometry), &dm, geometry.det);
+                add_btb(&mut k_local, &bending_b(&geometry), &db, geometry.det);
+                add_shear(
+                    &mut k_local,
+                    ds,
+                    &shear_b(&x, &y, xi, eta, &geometry),
+                    geometry.det,
+                );
             }
         }
 
@@ -163,6 +179,8 @@ impl ShellElement {
             x,
             y,
             dm,
+            db,
+            ds,
             dofs,
             mass,
         })
@@ -188,12 +206,19 @@ impl ShellElement {
         let d = self.to_local(d_global);
         let geometry = Geometry::at(&self.x, &self.y, xi, eta);
         let strain = b_times_d(&membrane_b(&geometry), &d);
-        let forces = mat_vec(&self.dm, &strain);
+        let membrane = mat_vec(&self.dm, &strain);
+        let curvature = b_times_d(&bending_b(&geometry), &d);
+        let moments = mat_vec(&self.db, &curvature);
+        let shear = shear_b(&self.x, &self.y, xi, eta, &geometry);
         ShellForces {
-            n11: forces[0],
-            n22: forces[1],
-            n12: forces[2],
-            ..ShellForces::default()
+            n11: membrane[0],
+            n22: membrane[1],
+            n12: membrane[2],
+            m11: moments[0],
+            m22: moments[1],
+            m12: moments[2],
+            v13: self.ds * dot_row(&shear[0], &d),
+            v23: self.ds * dot_row(&shear[1], &d),
         }
     }
 
@@ -233,8 +258,8 @@ impl ShellElement {
 
     /// Work-equivalent nodal loads of a uniform local pressure [kN/m²].
     ///
-    /// A membrane has no transverse stiffness, so the normal component of the
-    /// pressure is ignored and the in-plane components are carried.
+    /// The bilinear shape functions produce nodal forces only, never nodal
+    /// moments.
     fn consistent_load(&self, q: Vec3) -> [Real; SHELL_DOF] {
         let mut weight = [0.0; 4];
         for &xi in &GAUSS {
@@ -249,6 +274,7 @@ impl ShellElement {
         for joint in 0..4 {
             local[joint * DOF_PER_NODE] = q.x * weight[joint];
             local[joint * DOF_PER_NODE + 1] = q.y * weight[joint];
+            local[joint * DOF_PER_NODE + 2] = q.z * weight[joint];
         }
         self.to_global(&local)
     }
@@ -343,8 +369,14 @@ fn shell_axes(positions: [Vec3; 4]) -> Result<Mat3, ElementError> {
 /// Bilinear shape-function values and geometry at one natural point.
 struct Geometry {
     n: [Real; 4],
+    dxi: [Real; 4],
+    deta: [Real; 4],
     dx: [Real; 4],
     dy: [Real; 4],
+    x_xi: Real,
+    y_xi: Real,
+    x_eta: Real,
+    y_eta: Real,
     det: Real,
 }
 
@@ -383,7 +415,18 @@ impl Geometry {
             dy[joint] = (-x_eta * dxi[joint] + x_xi * deta[joint]) * inverse;
         }
 
-        Self { n, dx, dy, det }
+        Self {
+            n,
+            dxi,
+            deta,
+            dx,
+            dy,
+            x_xi,
+            y_xi,
+            x_eta,
+            y_eta,
+            det,
+        }
     }
 }
 
@@ -401,10 +444,72 @@ fn membrane_b(geometry: &Geometry) -> [[Real; SHELL_DOF]; 3] {
     b
 }
 
+/// Bending curvature–displacement matrix: `κ1 = -∂θy/∂1`, `κ2 = ∂θx/∂2`,
+/// `κ12 = ∂θx/∂1 - ∂θy/∂2`.
+fn bending_b(geometry: &Geometry) -> [[Real; SHELL_DOF]; 3] {
+    let mut b = [[0.0; SHELL_DOF]; 3];
+    for joint in 0..4 {
+        let rx = joint * DOF_PER_NODE + 3;
+        let ry = joint * DOF_PER_NODE + 4;
+        b[0][ry] = -geometry.dx[joint];
+        b[1][rx] = geometry.dy[joint];
+        b[2][rx] = geometry.dx[joint];
+        b[2][ry] = -geometry.dy[joint];
+    }
+    b
+}
+
+/// Covariant transverse shear row `γ_ξζ` (`along_xi`) or `γ_ηζ`.
+fn natural_shear_b(geometry: &Geometry, along_xi: bool) -> [Real; SHELL_DOF] {
+    let mut row = [0.0; SHELL_DOF];
+    for joint in 0..4 {
+        let w = joint * DOF_PER_NODE + 2;
+        let rx = joint * DOF_PER_NODE + 3;
+        let ry = joint * DOF_PER_NODE + 4;
+        if along_xi {
+            row[w] = geometry.dxi[joint];
+            row[ry] += geometry.x_xi * geometry.n[joint];
+            row[rx] -= geometry.y_xi * geometry.n[joint];
+        } else {
+            row[w] = geometry.deta[joint];
+            row[ry] += geometry.x_eta * geometry.n[joint];
+            row[rx] -= geometry.y_eta * geometry.n[joint];
+        }
+    }
+    row
+}
+
+/// MITC4 assumed transverse-shear field in physical local components.
+///
+/// The covariant shear is sampled at the four edge midpoints and interpolated
+/// bilinearly. That is what stops a thin element from over-stiffening.
+fn shear_b(
+    x: &[Real; 4],
+    y: &[Real; 4],
+    xi: Real,
+    eta: Real,
+    geometry: &Geometry,
+) -> [[Real; SHELL_DOF]; 2] {
+    let bottom = natural_shear_b(&Geometry::at(x, y, 0.0, -1.0), true);
+    let top = natural_shear_b(&Geometry::at(x, y, 0.0, 1.0), true);
+    let left = natural_shear_b(&Geometry::at(x, y, -1.0, 0.0), false);
+    let right = natural_shear_b(&Geometry::at(x, y, 1.0, 0.0), false);
+
+    let inverse = 1.0 / geometry.det;
+    let mut b = [[0.0; SHELL_DOF]; 2];
+    for dof in 0..SHELL_DOF {
+        let natural_xi = 0.5 * (1.0 - eta) * bottom[dof] + 0.5 * (1.0 + eta) * top[dof];
+        let natural_eta = 0.5 * (1.0 - xi) * left[dof] + 0.5 * (1.0 + xi) * right[dof];
+        b[0][dof] = (geometry.y_eta * natural_xi - geometry.y_xi * natural_eta) * inverse;
+        b[1][dof] = (-geometry.x_eta * natural_xi + geometry.x_xi * natural_eta) * inverse;
+    }
+    b
+}
+
 /// Plane-stress constitutive matrix, with the shear term in engineering
-/// strain.
-fn plane_stress_matrix(modulus: Real, poisson: Real, thickness: Real) -> [[Real; 3]; 3] {
-    let factor = modulus * thickness / (1.0 - poisson * poisson);
+/// strain. `rigidity` is `E·t` for membrane and `E·t³/12` for bending.
+fn plane_stress_matrix(rigidity: Real, poisson: Real) -> [[Real; 3]; 3] {
+    let factor = rigidity / (1.0 - poisson * poisson);
     [
         [factor, factor * poisson, 0.0],
         [factor * poisson, factor, 0.0],
@@ -453,6 +558,24 @@ fn mat_vec(m: &[[Real; 3]; 3], v: &[Real; 3]) -> [Real; 3] {
         m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
         m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
     ]
+}
+
+fn dot_row(row: &[Real; SHELL_DOF], d: &[Real; SHELL_DOF]) -> Real {
+    row.iter().zip(d.iter()).map(|(a, b)| a * b).sum()
+}
+
+fn add_shear(
+    k: &mut [Real; SHELL_DOF * SHELL_DOF],
+    ds: Real,
+    b: &[[Real; SHELL_DOF]; 2],
+    weight: Real,
+) {
+    for row in 0..SHELL_DOF {
+        for column in 0..SHELL_DOF {
+            let value = ds * (b[0][row] * b[0][column] + b[1][row] * b[1][column]);
+            k[row * SHELL_DOF + column] += value * weight;
+        }
+    }
 }
 
 fn add_btb(
@@ -639,6 +762,69 @@ mod tests {
                 let b = stiffness[column * SHELL_DOF + row];
                 assert!((a - b).abs() <= allowed, "entries {a} and {b} differ");
             }
+        }
+    }
+
+    fn plate_rigidity() -> Real {
+        MODULUS * THICKNESS * THICKNESS * THICKNESS / (12.0 * (1.0 - POISSON * POISSON))
+    }
+
+    /// A constant-curvature field with Kirchhoff rotations, in local
+    /// coordinates.
+    fn curvature_field(positions: &[Vec3; 4], k11: Real, k22: Real) -> [Real; SHELL_DOF] {
+        let centre = (positions[0] + positions[1] + positions[2] + positions[3]) * 0.25;
+        let mut d = [0.0; SHELL_DOF];
+        for joint in 0..4 {
+            let x = positions[joint].x - centre.x;
+            let y = positions[joint].y - centre.y;
+            d[joint * DOF_PER_NODE + 2] = 0.5 * (k11 * x * x + k22 * y * y);
+            d[joint * DOF_PER_NODE + 3] = k22 * y;
+            d[joint * DOF_PER_NODE + 4] = -k11 * x;
+        }
+        d
+    }
+
+    #[test]
+    fn a_constant_curvature_field_gives_the_plate_moments() {
+        let positions = rectangle(3.0, 2.0);
+        let element = shell(positions);
+        let k11 = 1.0e-3;
+        let k22 = -4.0e-4;
+        let d = curvature_field(&positions, k11, k22);
+
+        let rigidity = plate_rigidity();
+        let allowed = 1.0e-9 * rigidity * (k11.abs() + k22.abs());
+        let forces = element.forces_at(&d, 0.0, 0.0);
+        let m11 = rigidity * (k11 + POISSON * k22);
+        let m22 = rigidity * (k22 + POISSON * k11);
+        assert!((forces.m11 - m11).abs() < allowed, "{forces:?}");
+        assert!((forces.m22 - m22).abs() < allowed, "{forces:?}");
+        assert!(forces.m12.abs() < allowed, "{forces:?}");
+    }
+
+    #[test]
+    fn a_kirchhoff_field_carries_no_transverse_shear() {
+        let positions = rectangle(3.0, 2.0);
+        let element = shell(positions);
+        let k11 = 1.0e-3;
+        let k22 = -4.0e-4;
+        let d = curvature_field(&positions, k11, k22);
+
+        let allowed = 1.0e-9 * element.ds * (k11.abs() + k22.abs());
+        let forces = element.forces_at(&d, 0.4, -0.3);
+        assert!(forces.v13.abs() < allowed, "{forces:?}");
+        assert!(forces.v23.abs() < allowed, "{forces:?}");
+    }
+
+    #[test]
+    fn a_pressure_reaches_the_transverse_degrees_of_freedom() {
+        let element = shell(rectangle(3.0, 2.0));
+        let load = element.equivalent_load(Vec3::new(0.0, 0.0, -2.0));
+        let total: Real = (0..4).map(|joint| load[joint * DOF_PER_NODE + 2]).sum();
+        assert!((total + 12.0).abs() < 1.0e-9, "{total}");
+        for joint in 0..4 {
+            assert!(load[joint * DOF_PER_NODE].abs() < 1.0e-12);
+            assert!(load[joint * DOF_PER_NODE + 1].abs() < 1.0e-12);
         }
     }
 }
