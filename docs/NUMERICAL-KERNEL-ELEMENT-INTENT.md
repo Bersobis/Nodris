@@ -134,12 +134,16 @@ is what produces P-Delta amplification and buckling.
 A frame reads the axial force only. The membrane components belong to shells
 and patches.
 
+A shell has an initial-stress matrix, so it returns `Some` even when the
+resultants are zero (a zero matrix). It integrates the transverse slopes
+against `nx`, `ny` and `nxy`; the drilling rotation carries no term.
+
 ## What the contract does not cover
 
-- The shell carries membrane and Mindlin bending. Its geometric stiffness
-  and the isogeometric patch arrive in later steps of Phase 4, and they reuse
-  this degree-of-freedom order, so that ties and loads can be shared between
-  the formulations.
+- The shell carries membrane, Mindlin bending and a transverse geometric
+  stiffness. The isogeometric patch arrives in a later step of Phase 4 and
+  reuses this degree-of-freedom order, so that ties and loads can be shared
+  between the formulations.
 - The assembler does not exist yet. Numbering, restraints and the deactivation
   of zero-diagonal degrees of freedom are its job.
 - Strong-axis bending and warping are not modelled. The section carries a
@@ -157,3 +161,4 @@ and patches.
 | Mass split shared by frame and bar | `element/mod.rs` |
 | Membrane constant strain and edge traction | `element/shell4.rs` |
 | Plate moments, MITC4 shear and Navier deflection | `element/shell4.rs`, `tests/plate.rs` |
+| Tension/compression sign, rigid-motion invariance | `element/shell4.rs` |

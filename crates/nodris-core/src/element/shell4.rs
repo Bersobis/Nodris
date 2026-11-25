@@ -222,6 +222,46 @@ impl ShellElement {
         }
     }
 
+    /// Initial-stress matrix from the membrane resultants [kN/m], tension
+    /// positive.
+    ///
+    /// The transverse slopes are integrated against `nx`, `ny` and `nxy` with
+    /// the same 2 × 2 rule as the elastic stiffness, so tension stiffens the
+    /// plate and compression softens it. Only `w` carries the term, so a
+    /// constant `w` produces no geometric force.
+    pub fn geometric_stiffness(
+        &self,
+        nx: Real,
+        ny: Real,
+        nxy: Real,
+    ) -> [Real; SHELL_DOF * SHELL_DOF] {
+        let mut local = [0.0; SHELL_DOF * SHELL_DOF];
+        if nx == 0.0 && ny == 0.0 && nxy == 0.0 {
+            return local;
+        }
+
+        let mut transverse = [0usize; 4];
+        for (joint, dof) in transverse.iter_mut().enumerate() {
+            *dof = joint * DOF_PER_NODE + 2;
+        }
+        for &xi in &GAUSS {
+            for &eta in &GAUSS {
+                let geometry = Geometry::at(&self.x, &self.y, xi, eta);
+                for (row, &row_dof) in transverse.iter().enumerate() {
+                    for (column, &column_dof) in transverse.iter().enumerate() {
+                        let slope = nx * geometry.dx[row] * geometry.dx[column]
+                            + ny * geometry.dy[row] * geometry.dy[column]
+                            + nxy
+                                * (geometry.dx[row] * geometry.dy[column]
+                                    + geometry.dy[row] * geometry.dx[column]);
+                        local[row_dof * SHELL_DOF + column_dof] += slope * geometry.det;
+                    }
+                }
+            }
+        }
+        transform_to_global(&self.axes, &local)
+    }
+
     fn to_global(&self, local: &[Real; SHELL_DOF]) -> [Real; SHELL_DOF] {
         let transpose = self.axes.transpose();
         let mut out = [0.0; SHELL_DOF];
@@ -321,8 +361,11 @@ impl Element for ShellElement {
         &self.mass
     }
 
-    fn geometric_stiffness(&self, _stress: InitialStress) -> Option<Vec<Real>> {
-        None
+    fn geometric_stiffness(&self, stress: InitialStress) -> Option<Vec<Real>> {
+        Some(
+            self.geometric_stiffness(stress.nx, stress.ny, stress.nxy)
+                .to_vec(),
+        )
     }
 }
 
@@ -746,9 +789,12 @@ mod tests {
         assert_eq!(formulation.stiffness().len(), SHELL_DOF * SHELL_DOF);
         assert!((element.area() - 6.0).abs() < 1.0e-12);
         assert_eq!(element.thickness(), THICKNESS);
-        assert!(formulation
+        // A shell reads the membrane resultants, so an axial-only state
+        // contributes nothing.
+        let axial_only = formulation
             .geometric_stiffness(InitialStress::axial(-1.0))
-            .is_none());
+            .expect("a shell has an initial-stress matrix");
+        assert!(axial_only.iter().all(|&value| value == 0.0));
     }
 
     #[test]
@@ -826,5 +872,98 @@ mod tests {
             assert!(load[joint * DOF_PER_NODE].abs() < 1.0e-12);
             assert!(load[joint * DOF_PER_NODE + 1].abs() < 1.0e-12);
         }
+    }
+
+    /// A saddle-shaped `w` field, so the field is neither constant nor a rigid
+    /// rotation.
+    fn warped_field(positions: &[Vec3; 4], amplitude: Real) -> [Real; SHELL_DOF] {
+        let centre = (positions[0] + positions[1] + positions[2] + positions[3]) * 0.25;
+        let mut d = [0.0; SHELL_DOF];
+        for joint in 0..4 {
+            let x = positions[joint].x - centre.x;
+            let y = positions[joint].y - centre.y;
+            d[joint * DOF_PER_NODE + 2] = amplitude * x * y;
+        }
+        d
+    }
+
+    fn quadratic_form(matrix: &[Real], d: &[Real; SHELL_DOF]) -> Real {
+        let mut sum = 0.0;
+        for row in 0..SHELL_DOF {
+            for column in 0..SHELL_DOF {
+                sum += d[row] * matrix[row * SHELL_DOF + column] * d[column];
+            }
+        }
+        sum
+    }
+
+    fn forces(matrix: &[Real], d: &[Real; SHELL_DOF]) -> [Real; SHELL_DOF] {
+        let mut out = [0.0; SHELL_DOF];
+        for row in 0..SHELL_DOF {
+            for column in 0..SHELL_DOF {
+                out[row] += matrix[row * SHELL_DOF + column] * d[column];
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn tension_stiffens_and_compression_softens_the_plate() {
+        let positions = rectangle(3.0, 2.0);
+        let element = shell(positions);
+        let d = warped_field(&positions, 1.0e-3);
+
+        let tension = element.geometric_stiffness(10.0, 10.0, 0.0);
+        let compression = element.geometric_stiffness(-10.0, -10.0, 0.0);
+        let tension_energy = quadratic_form(&tension, &d);
+        let compression_energy = quadratic_form(&compression, &d);
+        assert!(tension_energy > 0.0, "{tension_energy}");
+        assert!(compression_energy < 0.0, "{compression_energy}");
+        assert!(
+            (tension_energy + compression_energy).abs() <= 1.0e-9 * tension_energy,
+            "the sign must flip with the stress"
+        );
+
+        let zero = element.geometric_stiffness(0.0, 0.0, 0.0);
+        assert_eq!(quadratic_form(&zero, &d), 0.0);
+
+        let doubled = element.geometric_stiffness(20.0, 20.0, 0.0);
+        assert!(
+            (quadratic_form(&doubled, &d) - 2.0 * tension_energy).abs() <= 1.0e-9 * tension_energy,
+            "the matrix must be linear in the resultants"
+        );
+    }
+
+    #[test]
+    fn a_rigid_translation_carries_no_geometric_force() {
+        let element = shell(rectangle(3.0, 2.0));
+        let stress = InitialStress::membrane(10.0, -4.0, 3.0);
+        let matrix = element.geometric_stiffness(stress.nx, stress.ny, stress.nxy);
+        let allowed = 1.0e-9
+            * matrix
+                .iter()
+                .fold(0.0_f64, |peak, value| peak.max(value.abs()))
+            * SHELL_DOF as Real;
+
+        let mut translation = [0.0; SHELL_DOF];
+        for joint in 0..4 {
+            translation[joint * DOF_PER_NODE + 2] = 1.0;
+        }
+        for (index, force) in forces(&matrix, &translation).iter().enumerate() {
+            assert!(force.abs() < allowed, "dof {index} force {force}");
+        }
+    }
+
+    #[test]
+    fn the_trait_reports_the_same_geometric_stiffness() {
+        let element = shell(rectangle(3.0, 2.0));
+        let stress = InitialStress::membrane(5.0, -2.0, 1.5);
+        let formulation: &dyn Element = &element;
+        let through_trait = formulation
+            .geometric_stiffness(stress)
+            .expect("a shell has an initial-stress matrix");
+        let direct = element.geometric_stiffness(stress.nx, stress.ny, stress.nxy);
+        assert_eq!(through_trait.len(), SHELL_DOF * SHELL_DOF);
+        assert_eq!(through_trait.as_slice(), direct.as_slice());
     }
 }
