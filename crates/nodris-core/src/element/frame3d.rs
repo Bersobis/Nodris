@@ -6,7 +6,7 @@
 //!
 //! Local DOF order at each end is translation X, Y, Z, then rotation X, Y, Z.
 
-use super::{member_dofs, Element, ElementError, DOF_PER_NODE};
+use super::{member_dofs, Element, ElementError, InitialStress, DOF_PER_NODE};
 use crate::math::{Mat3, Real, Vec3};
 use crate::model::{Material, Section};
 
@@ -214,6 +214,40 @@ pub fn end_forces(
     out
 }
 
+/// Local geometric stiffness of a beam-column under axial force `n`.
+///
+/// Tension is positive. The transverse blocks come from integrating the cubic
+/// shape-function derivatives; axial deformation and torsion have no term.
+fn local_geometric_stiffness(n: Real, length: Real) -> [[Real; FRAME_DOF]; FRAME_DOF] {
+    let factor = n / (30.0 * length);
+    let l = length;
+    let mut local = [[0.0; FRAME_DOF]; FRAME_DOF];
+
+    // Bending about local z, in [v_i, rz_i, v_j, rz_j].
+    let vy = [
+        [36.0, 3.0 * l, -36.0, 3.0 * l],
+        [3.0 * l, 4.0 * l * l, -3.0 * l, -l * l],
+        [-36.0, -3.0 * l, 36.0, -3.0 * l],
+        [3.0 * l, -l * l, -3.0 * l, 4.0 * l * l],
+    ];
+    // With ry = -dw/dx, the coupling terms change sign for bending about y.
+    let wz = [
+        [36.0, -3.0 * l, -36.0, -3.0 * l],
+        [-3.0 * l, 4.0 * l * l, 3.0 * l, -l * l],
+        [-36.0, 3.0 * l, 36.0, 3.0 * l],
+        [-3.0 * l, -l * l, 3.0 * l, 4.0 * l * l],
+    ];
+    let dof_vy = [1, 5, 7, 11];
+    let dof_wz = [2, 4, 8, 10];
+    for row in 0..4 {
+        for column in 0..4 {
+            local[dof_vy[row]][dof_vy[column]] += factor * vy[row][column];
+            local[dof_wz[row]][dof_wz[column]] += factor * wz[row][column];
+        }
+    }
+    local
+}
+
 fn member_mass(density: Real, section: &Section, length: Real) -> [Real; FRAME_DOF] {
     let translational = density * section.area * length / 1000.0;
     let torsional = density * section.torsion_constant * length / 1000.0;
@@ -344,6 +378,18 @@ impl Element for FrameElement {
 
     fn lumped_mass(&self) -> &[Real] {
         &self.mass
+    }
+
+    fn geometric_stiffness(&self, stress: InitialStress) -> Option<Vec<Real>> {
+        // Membrane resultants belong to shells and patches. A frame reads
+        // only the axial force, and always has a matrix to contribute.
+        let local = local_geometric_stiffness(stress.axial, self.length);
+        Some(
+            to_global(&self.axes, &local)
+                .into_iter()
+                .flatten()
+                .collect(),
+        )
     }
 }
 
@@ -603,6 +649,119 @@ mod tests {
         assert_eq!(formulation.equivalent_load(Vec3::Y)[1], 1.0);
         let forces = formulation.end_forces(&[0.0; FRAME_DOF], Vec3::Y);
         assert!((forces[1] + 1.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn geometric_stiffness_is_symmetric_and_linear_in_axial_force() {
+        let element = FrameElement::new(
+            Vec3::ZERO,
+            Vec3::new(2.0, 0.0, 0.0),
+            0.0,
+            &material(),
+            &section(),
+            0,
+            1,
+        )
+        .unwrap();
+        let single = element
+            .geometric_stiffness(InitialStress::axial(-5.0))
+            .unwrap();
+        let double = element
+            .geometric_stiffness(InitialStress::axial(-10.0))
+            .unwrap();
+        assert_eq!(single.len(), FRAME_DOF * FRAME_DOF);
+        for row in 0..FRAME_DOF {
+            for column in 0..FRAME_DOF {
+                assert_eq!(
+                    single[row * FRAME_DOF + column],
+                    single[column * FRAME_DOF + row]
+                );
+                assert!(
+                    (double[row * FRAME_DOF + column] - 2.0 * single[row * FRAME_DOF + column])
+                        .abs()
+                        < 1.0e-8
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compression_softens_and_tension_stiffens_transverse_dofs() {
+        let element = FrameElement::new(
+            Vec3::ZERO,
+            Vec3::new(2.0, 0.0, 0.0),
+            0.0,
+            &material(),
+            &section(),
+            0,
+            1,
+        )
+        .unwrap();
+        let elastic = element.stiffness()[7 * FRAME_DOF + 7];
+        let compressed = element
+            .geometric_stiffness(InitialStress::axial(-5.0))
+            .unwrap()[7 * FRAME_DOF + 7];
+        let tension = element
+            .geometric_stiffness(InitialStress::axial(5.0))
+            .unwrap()[7 * FRAME_DOF + 7];
+        assert!(compressed < 0.0 && tension > 0.0);
+        assert!(elastic + compressed < elastic);
+        assert!(elastic + tension > elastic);
+    }
+
+    #[test]
+    fn geometric_stiffness_has_no_translation_mode() {
+        let axes = local_axes(Vec3::ZERO, Vec3::new(0.0, 3.0, 0.0), 0.4).unwrap();
+        let kg = to_global(&axes, &local_geometric_stiffness(-8.0, 3.0));
+        let mut d = [0.0; FRAME_DOF];
+        for node in 0..2 {
+            let base = node * DOF_PER_NODE;
+            d[base] = 1.5;
+            d[base + 1] = -0.5;
+            d[base + 2] = 2.0;
+        }
+        for (row, coefficients) in kg.iter().enumerate() {
+            let force: Real = coefficients
+                .iter()
+                .zip(d.iter())
+                .map(|(coefficient, displacement)| coefficient * displacement)
+                .sum();
+            assert!(force.abs() < 1.0e-8, "translation force {force} at {row}");
+        }
+    }
+
+    #[test]
+    fn a_compressed_cantilever_reaches_the_euler_load() {
+        let length = 2.0;
+        let eiz = 10.0;
+        let elastic = local_frame_stiffness(100.0, 20.0, eiz, 5.0, length).unwrap();
+        let unit = local_geometric_stiffness(1.0, length);
+        let (a, b, d) = (elastic[7][7], elastic[7][11], elastic[11][11]);
+        let (av, bv, dv) = (unit[7][7], unit[7][11], unit[11][11]);
+        let quadratic_a = av * dv - bv * bv;
+        let quadratic_b = a * dv + d * av - 2.0 * b * bv;
+        let quadratic_c = a * d - b * b;
+        let discriminant = quadratic_b * quadratic_b - 4.0 * quadratic_a * quadratic_c;
+        assert!(discriminant > 0.0);
+        let axial = (-quadratic_b + discriminant.sqrt()) / (2.0 * quadratic_a);
+        assert!(axial < 0.0);
+        let critical = -axial;
+        let euler = std::f64::consts::PI * std::f64::consts::PI * eiz / (4.0 * length * length);
+        assert!(
+            (critical - euler).abs() <= 0.03 * euler,
+            "finite element critical load {critical}, Euler {euler}"
+        );
+    }
+
+    #[test]
+    fn initial_stress_keeps_axial_and_membrane_separate() {
+        let axial = InitialStress::axial(-3.0);
+        let membrane = InitialStress::membrane(1.0, 2.0, 0.5);
+        assert_eq!(axial.axial, -3.0);
+        assert_eq!(membrane.nxy, 0.5);
+        assert_eq!(membrane.axial, 0.0);
+        assert!(!axial.is_zero());
+        assert!(InitialStress::default().is_zero());
     }
 
     #[test]

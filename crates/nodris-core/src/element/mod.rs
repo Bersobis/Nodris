@@ -59,6 +59,43 @@ impl fmt::Display for ElementError {
 
 impl std::error::Error for ElementError {}
 
+/// The stress state a geometric stiffness is built from.
+///
+/// A member uses `axial` in kN, tension positive. A shell or patch uses the
+/// membrane resultants in kN/m, also positive in tension. Keeping both in one
+/// value lets every formulation use the same trait method.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct InitialStress {
+    pub axial: Real,
+    pub nx: Real,
+    pub ny: Real,
+    pub nxy: Real,
+}
+
+impl InitialStress {
+    /// Axial force in a bar or frame, tension positive.
+    pub fn axial(axial: Real) -> Self {
+        Self {
+            axial,
+            ..Self::default()
+        }
+    }
+
+    /// Membrane resultants in a shell or patch, tension positive.
+    pub fn membrane(nx: Real, ny: Real, nxy: Real) -> Self {
+        Self {
+            nx,
+            ny,
+            nxy,
+            ..Self::default()
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.axial == 0.0 && self.nx == 0.0 && self.ny == 0.0 && self.nxy == 0.0
+    }
+}
+
 /// Number of degrees of freedom at every node.
 pub const DOF_PER_NODE: usize = 6;
 
@@ -116,6 +153,14 @@ pub trait Element {
     ///
     /// Mass is in tonnes so that `kN / (m·t) = s⁻²` for modal analysis.
     fn lumped_mass(&self) -> &[Real];
+
+    /// Global geometric stiffness for the current initial-stress state.
+    ///
+    /// `None` means the formulation has no initial-stress matrix, so a
+    /// second-order analysis leaves it unchanged.
+    fn geometric_stiffness(&self, _stress: InitialStress) -> Option<Vec<Real>> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +298,9 @@ mod tests {
         assert_eq!(formulation.equivalent_load(q)[0], 1.0);
         assert_eq!(formulation.equivalent_load(q)[DOF_PER_NODE + 2], 3.0);
         assert_eq!(formulation.lumped_mass().len(), 2 * DOF_PER_NODE);
+        assert!(formulation
+            .geometric_stiffness(InitialStress::axial(-1.0))
+            .is_none());
         let d = vec![0.0; 2 * DOF_PER_NODE];
         let forces = formulation.end_forces(&d, q);
         assert_eq!(forces[0], -1.0);
