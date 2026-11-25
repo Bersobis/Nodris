@@ -248,25 +248,6 @@ fn local_geometric_stiffness(n: Real, length: Real) -> [[Real; FRAME_DOF]; FRAME
     local
 }
 
-fn member_mass(density: Real, section: &Section, length: Real) -> [Real; FRAME_DOF] {
-    let translational = density * section.area * length / 1000.0;
-    let torsional = density * section.torsion_constant * length / 1000.0;
-    let about_y = density * section.inertia_y * length / 1000.0;
-    let about_z = density * section.inertia_z * length / 1000.0;
-    let mut mass = [0.0; FRAME_DOF];
-    for component in 0..3 {
-        mass[component] = translational / 2.0;
-        mass[component + DOF_PER_NODE] = translational / 2.0;
-    }
-    mass[3] = torsional / 2.0;
-    mass[DOF_PER_NODE + 3] = torsional / 2.0;
-    mass[4] = about_y / 2.0;
-    mass[DOF_PER_NODE + 4] = about_y / 2.0;
-    mass[5] = about_z / 2.0;
-    mass[DOF_PER_NODE + 5] = about_z / 2.0;
-    mass
-}
-
 /// A fully prepared two-node frame element.
 #[derive(Clone, Debug)]
 pub struct FrameElement {
@@ -332,7 +313,7 @@ impl FrameElement {
             k_local,
             k_global,
             dofs: member_dofs(start, end),
-            mass: member_mass(material.density, section, length),
+            mass: super::member_lumped_mass(material.density, section, length, true),
             ea_over_l: ea / length,
         })
     }

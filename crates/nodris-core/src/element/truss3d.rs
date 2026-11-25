@@ -68,12 +68,7 @@ impl TrussElement {
             }
         }
 
-        let mass_each = material.density * section.area * length / 2000.0;
-        let mut mass = [0.0; BAR_DOF];
-        for component in 0..3 {
-            mass[component] = mass_each;
-            mass[component + DOF_PER_NODE] = mass_each;
-        }
+        let mass = super::member_lumped_mass(material.density, section, length, false);
 
         Ok(Self {
             length,

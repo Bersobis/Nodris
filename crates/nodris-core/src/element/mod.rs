@@ -11,6 +11,7 @@
 use std::fmt;
 
 use crate::math::{Mat3, Real, Vec3};
+use crate::model::Section;
 
 mod frame3d;
 mod truss3d;
@@ -127,6 +128,38 @@ pub const fn member_dofs(start: usize, end: usize) -> [usize; 2 * DOF_PER_NODE] 
     dofs
 }
 
+/// Lumped nodal mass of a member, in tonnes, in local DOF order.
+///
+/// Half the mass goes to each end. Rotary inertia is included even though
+/// Euler–Bernoulli theory drops it: the eigenproblem needs a positive mass
+/// matrix. A truss leaves it out, because its rotational degrees of freedom
+/// are deactivated by the assembler.
+pub(crate) fn member_lumped_mass(
+    density: Real,
+    section: &Section,
+    length: Real,
+    rotary: bool,
+) -> [Real; 2 * DOF_PER_NODE] {
+    let translational = density * section.area * length / 1000.0;
+    let mut mass = [0.0; 2 * DOF_PER_NODE];
+    for component in 0..3 {
+        mass[component] = translational / 2.0;
+        mass[component + DOF_PER_NODE] = translational / 2.0;
+    }
+    if rotary {
+        let torsional = density * section.torsion_constant * length / 1000.0;
+        let about_y = density * section.inertia_y * length / 1000.0;
+        let about_z = density * section.inertia_z * length / 1000.0;
+        mass[3] = torsional / 2.0;
+        mass[DOF_PER_NODE + 3] = torsional / 2.0;
+        mass[4] = about_y / 2.0;
+        mass[DOF_PER_NODE + 4] = about_y / 2.0;
+        mass[5] = about_z / 2.0;
+        mass[DOF_PER_NODE + 5] = about_z / 2.0;
+    }
+    mass
+}
+
 /// The contract between a formulation and the analysis pipeline.
 ///
 /// With `n = dofs().len()`, every vector below is in that local order. A
@@ -168,6 +201,37 @@ pub trait Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::{Section, SectionId};
+
+    #[test]
+    fn the_member_mass_split_is_shared_between_frame_and_truss() {
+        let section = Section::new(
+            SectionId::new(1),
+            "reference",
+            0.01,
+            2.0e-5,
+            3.0e-5,
+            4.0e-5,
+            0.0,
+        );
+        let density = 7850.0;
+        let length = 2.0;
+        let frame = member_lumped_mass(density, &section, length, true);
+        let truss = member_lumped_mass(density, &section, length, false);
+
+        let translational = density * 0.01 * length / 2000.0;
+        for component in 0..3 {
+            assert_eq!(frame[component], translational);
+            assert_eq!(frame[component + DOF_PER_NODE], translational);
+            assert_eq!(truss[component], translational);
+            assert_eq!(truss[component + DOF_PER_NODE], translational);
+        }
+        assert!(frame[3] > 0.0 && frame[4] > 0.0 && frame[5] > 0.0);
+        assert_eq!(truss[3], 0.0);
+        assert_eq!(truss[4], 0.0);
+        assert_eq!(truss[5], 0.0);
+        assert_eq!(truss[DOF_PER_NODE + 3], 0.0);
+    }
 
     struct DummyElement {
         dofs: [usize; 2 * DOF_PER_NODE],
