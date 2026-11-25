@@ -19,9 +19,11 @@ use crate::math::{Mat3, Real, Vec3};
 use crate::model::Section;
 
 mod frame3d;
+mod shell4;
 mod truss3d;
 
 pub use frame3d::{end_forces, local_axes, local_frame_stiffness, to_global, FrameElement};
+pub use shell4::{ShellElement, ShellForces};
 pub use truss3d::TrussElement;
 
 /// Invalid input to an element formulation.
@@ -37,6 +39,12 @@ pub enum ElementError {
     InvalidPoissonRatio { value: Real },
     /// Density must be finite and not negative.
     InvalidDensity { value: Real },
+    /// Thickness must be finite and greater than zero.
+    InvalidThickness { value: Real },
+    /// The joints do not define a plane.
+    DegenerateArea,
+    /// The joints run clockwise or cross over.
+    ClockwiseOrdering,
 }
 
 impl fmt::Display for ElementError {
@@ -60,6 +68,16 @@ impl fmt::Display for ElementError {
             }
             Self::InvalidDensity { value } => {
                 write!(f, "density must be finite and not negative, got {value}")
+            }
+            Self::InvalidThickness { value } => {
+                write!(
+                    f,
+                    "thickness must be finite and greater than zero, got {value}"
+                )
+            }
+            Self::DegenerateArea => write!(f, "the joints do not define a plane"),
+            Self::ClockwiseOrdering => {
+                write!(f, "the joints run clockwise or cross over")
             }
         }
     }
@@ -208,6 +226,11 @@ mod tests {
     use super::*;
     use crate::model::{Section, SectionId};
 
+    /// Relative comparison for values the two sides compute differently.
+    fn close(left: Real, right: Real) -> bool {
+        (left - right).abs() <= 1.0e-12 * left.abs().max(right.abs()).max(1.0)
+    }
+
     #[test]
     fn the_member_mass_split_is_shared_between_frame_and_truss() {
         let section = Section::new(
@@ -226,16 +249,16 @@ mod tests {
 
         let translational = density * 0.01 * length / 2000.0;
         for component in 0..3 {
-            assert_eq!(frame[component], translational);
-            assert_eq!(frame[component + DOF_PER_NODE], translational);
-            assert_eq!(truss[component], translational);
-            assert_eq!(truss[component + DOF_PER_NODE], translational);
+            assert!(close(frame[component], translational));
+            assert!(close(frame[component + DOF_PER_NODE], translational));
+            assert!(close(truss[component], translational));
+            assert!(close(truss[component + DOF_PER_NODE], translational));
         }
         assert!(frame[3] > 0.0 && frame[4] > 0.0 && frame[5] > 0.0);
-        assert_eq!(truss[3], 0.0);
-        assert_eq!(truss[4], 0.0);
-        assert_eq!(truss[5], 0.0);
-        assert_eq!(truss[DOF_PER_NODE + 3], 0.0);
+        assert!(close(truss[3], 0.0));
+        assert!(close(truss[4], 0.0));
+        assert!(close(truss[5], 0.0));
+        assert!(close(truss[DOF_PER_NODE + 3], 0.0));
     }
 
     struct DummyElement {
