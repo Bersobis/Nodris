@@ -1,0 +1,75 @@
+digraph {
+
+    graph [
+        label="nodris_core",
+        labelloc=t,
+
+        pad=0.4,
+
+        // Consider rendering the graph using a different layout algorithm, such as:
+        // [dot, neato, twopi, circo, fdp, sfdp]
+        layout=dot,
+        overlap=false,
+        splines="ortho",
+        rankdir=LR,
+
+        fontname="Helvetica", 
+        fontsize="36",
+    ];
+
+    node [
+        fontname="monospace",
+        fontsize="10",
+        shape="record",
+        style="filled",
+    ];
+
+    edge [
+        fontname="monospace",
+        fontsize="10",
+    ];
+
+    "nodris_core" [label="crate|nodris_core", fillcolor="#5397c8"]; // "crate" node
+    "nodris_core::math" [label="pub mod|math", fillcolor="#81c169"]; // "mod" node
+    "nodris_core::math::error" [label="pub mod|math::error", fillcolor="#81c169"]; // "mod" node
+    "nodris_core::math::index" [label="pub mod|math::index", fillcolor="#81c169"]; // "mod" node
+    "nodris_core::math::linalg" [label="pub mod|math::linalg", fillcolor="#81c169"]; // "mod" node
+    "nodris_core::math::mat3" [label="pub(self) mod|math::mat3", fillcolor="#db5367"]; // "mod" node
+    "nodris_core::math::tolerance" [label="pub mod|math::tolerance", fillcolor="#81c169"]; // "mod" node
+    "nodris_core::math::vec3" [label="pub(self) mod|math::vec3", fillcolor="#db5367"]; // "mod" node
+    "nodris_core::model" [label="pub mod|model", fillcolor="#81c169"]; // "mod" node
+    "nodris_core::units" [label="pub mod|units", fillcolor="#81c169"]; // "mod" node
+
+    "nodris_core" -> "nodris_core::math" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core" -> "nodris_core::math::error" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core" -> "nodris_core::math::index" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core" -> "nodris_core::math::linalg" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core" -> "nodris_core::math::mat3" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core" -> "nodris_core::math::vec3" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core" -> "nodris_core::model" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core" -> "nodris_core::model" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core" -> "nodris_core::units" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::error" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::error" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math" -> "nodris_core::math::index" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::index" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math" -> "nodris_core::math::linalg" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::linalg" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math" -> "nodris_core::math::mat3" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::mat3" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math" -> "nodris_core::math::tolerance" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::vec3" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_core::math" -> "nodris_core::math::vec3" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::error" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::linalg" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::linalg" -> "nodris_core::math::error" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::linalg" -> "nodris_core::math::index" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::mat3" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::mat3" -> "nodris_core::math::vec3" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::tolerance" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::math::vec3" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::model" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::model" -> "nodris_core::units" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_core::units" -> "nodris_core::math" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+
+}

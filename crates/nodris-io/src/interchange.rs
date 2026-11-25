@@ -57,6 +57,10 @@ pub enum ImportNoteKind {
     MissingCollection,
     /// A field this build does not know was found and kept.
     UnknownField,
+    /// Migration changed the declared version.
+    Migrated,
+    /// Migration was asked for on a document that is already current.
+    AlreadyCurrent,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,6 +160,15 @@ pub struct ModelDocument {
 #[derive(Clone, Debug)]
 pub struct ModelRead {
     pub document: ModelDocument,
+    pub notes: Vec<ImportNote>,
+}
+
+/// The result of a migration. It is new text; the source is never edited.
+#[derive(Clone, Debug)]
+pub struct Migration {
+    pub from_version: u32,
+    pub to_version: u32,
+    pub text: String,
     pub notes: Vec<ImportNote>,
 }
 
@@ -275,11 +288,52 @@ pub fn document_to_value(document: &ModelDocument) -> Result<Value, InterchangeE
     Ok(Value::Object(root))
 }
 
-/// Writes a document with sorted object keys and a trailing newline.
-pub fn write_model_document(document: &ModelDocument) -> Result<String, InterchangeError> {
-    let mut text = serde_json::to_string_pretty(&document_to_value(document)?)?;
+/// Serialises a JSON tree with sorted object keys and a trailing newline.
+fn canonical_text(value: &Value) -> Result<String, InterchangeError> {
+    let mut text = serde_json::to_string_pretty(value)?;
     text.push('\n');
     Ok(text)
+}
+
+/// Writes a document with sorted object keys and a trailing newline.
+pub fn write_model_document(document: &ModelDocument) -> Result<String, InterchangeError> {
+    canonical_text(&document_to_value(document)?)
+}
+
+/// Rewrites a legacy document as v1 without discarding fields this build does
+/// not know. The parsed tree is edited directly, so unknown fields survive at
+/// every depth. The input text is never modified.
+pub fn migrate_model_text(raw: &str) -> Result<Migration, InterchangeError> {
+    let read = read_model_document(raw, ImportMode::Permissive)?;
+    let from_version = read.document.schema_version;
+    let mut tree: Value = serde_json::from_str(raw)?;
+    let root = tree
+        .as_object_mut()
+        .ok_or_else(|| InterchangeError::ExpectedType {
+            path: "$".to_string(),
+            expected: "object",
+        })?;
+    root.insert(SCHEMA_KEY.to_string(), Value::from(SCHEMA_VERSION));
+    let mut notes = read.notes;
+    notes.push(ImportNote::new(
+        if from_version == SCHEMA_VERSION {
+            ImportNoteKind::AlreadyCurrent
+        } else {
+            ImportNoteKind::Migrated
+        },
+        format!("$.{SCHEMA_KEY}"),
+        if from_version == SCHEMA_VERSION {
+            "document already declares v1; canonical formatting applied".to_string()
+        } else {
+            format!("declared schema version changed from v{from_version} to v{SCHEMA_VERSION}")
+        },
+    ));
+    Ok(Migration {
+        from_version,
+        to_version: SCHEMA_VERSION,
+        text: canonical_text(&Value::Object(root.clone()))?,
+        notes,
+    })
 }
 
 #[cfg(test)]

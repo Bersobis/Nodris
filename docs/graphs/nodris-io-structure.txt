@@ -1,0 +1,10 @@
+
+[2m[0m[38;5;68mcrate[0m nodris_io
+[2m├── [0m[38;5;68mmod[0m interchange[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m ImportMode[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m ImportNote[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m ImportNoteKind[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m InterchangeError[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m ModelDocument[2m:[0m [38;5;107mpub[0m
+[2m│   └── [0m[38;5;68mstruct[0m ModelRead[2m:[0m [38;5;107mpub[0m
+[2m└── [0m[38;5;68mmod[0m model_json[2m:[0m [38;5;215mpub(crate)[0m

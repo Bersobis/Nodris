@@ -1,0 +1,42 @@
+digraph {
+
+    graph [
+        label="nodris_io",
+        labelloc=t,
+
+        pad=0.4,
+
+        // Consider rendering the graph using a different layout algorithm, such as:
+        // [dot, neato, twopi, circo, fdp, sfdp]
+        layout=dot,
+        overlap=false,
+        splines="ortho",
+        rankdir=LR,
+
+        fontname="Helvetica", 
+        fontsize="36",
+    ];
+
+    node [
+        fontname="monospace",
+        fontsize="10",
+        shape="record",
+        style="filled",
+    ];
+
+    edge [
+        fontname="monospace",
+        fontsize="10",
+    ];
+
+    "nodris_io" [label="crate|nodris_io", fillcolor="#5397c8"]; // "crate" node
+    "nodris_io::interchange" [label="pub mod|interchange", fillcolor="#81c169"]; // "mod" node
+    "nodris_io::model_json" [label="pub(crate) mod|model_json", fillcolor="#f8c04c"]; // "mod" node
+
+    "nodris_io" -> "nodris_io::interchange" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_io" -> "nodris_io::interchange" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_io" -> "nodris_io::model_json" [label="owns", color="#000000", style="solid"] [constraint=true]; // "owns" edge
+    "nodris_io::interchange" -> "nodris_io::model_json" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+    "nodris_io::model_json" -> "nodris_io::interchange" [label="uses", color="#7f7f7f", style="dashed"] [constraint=false]; // "uses" edge
+
+}

@@ -16,7 +16,7 @@ mod model_json;
 pub mod interchange;
 
 pub use interchange::{
-    document_to_value, read_model_document, write_model_document, ImportMode, ImportNote,
-    ImportNoteKind, InterchangeError, ModelDocument, ModelRead, MODEL_SCHEMA_V1, ROOT_KEYS,
-    ROOT_OPTIONAL, ROOT_REQUIRED, SCHEMA_KEY, SCHEMA_VERSION,
+    document_to_value, migrate_model_text, read_model_document, write_model_document, ImportMode,
+    ImportNote, ImportNoteKind, InterchangeError, Migration, ModelDocument, ModelRead,
+    MODEL_SCHEMA_V1, ROOT_KEYS, ROOT_OPTIONAL, ROOT_REQUIRED, SCHEMA_KEY, SCHEMA_VERSION,
 };

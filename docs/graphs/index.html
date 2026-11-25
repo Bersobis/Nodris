@@ -1,0 +1,70 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Nodris module graphs</title><style>body{margin:0;padding:32px;background:#f9fafb;color:#1f2937;font-family:Segoe UI,Arial,sans-serif}h1{font-size:26px;margin:0 0 8px}p{color:#4b5563;margin:0 0 28px}section{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px;margin-bottom:24px;overflow:auto}h2{font-size:17px;margin:0 0 12px}.graph{display:block;max-width:100%;height:auto}</style></head><body><h1>Nodris module graphs</h1><p>Generated with cargo-modules 0.28.0. Solid edges are ownership, dashed edges are uses.</p><section><h2>nodris-core</h2><svg class="graph" xmlns="http://www.w3.org/2000/svg" width="810" height="524" viewBox="0 0 810 524">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="30" y="34" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600" fill="#1f2937">nodris_core module graph</text>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/>
+</marker>
+</defs>
+<path d="M 240,79.0 C 270.0,79.0 270.0,79.0 300,79.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core --owns--&gt; nodris_core::math</title></path>
+<path d="M 240,88.0 C 405.0,88.0 405.0,88.0 570,88.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core --uses--&gt; nodris_core::math::error</title></path>
+<path d="M 240,88.0 C 405.0,88.0 405.0,154.0 570,154.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core --uses--&gt; nodris_core::math::index</title></path>
+<path d="M 240,88.0 C 405.0,88.0 405.0,220.0 570,220.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core --uses--&gt; nodris_core::math::linalg</title></path>
+<path d="M 240,88.0 C 405.0,88.0 405.0,286.0 570,286.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core --uses--&gt; nodris_core::math::mat3</title></path>
+<path d="M 240,88.0 C 405.0,88.0 405.0,418.0 570,418.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core --uses--&gt; nodris_core::math::vec3</title></path>
+<path d="M 240,79.0 C 270.0,79.0 270.0,145.0 300,145.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core --owns--&gt; nodris_core::model</title></path>
+<path d="M 240,88.0 C 270.0,88.0 270.0,154.0 300,154.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core --uses--&gt; nodris_core::model</title></path>
+<path d="M 240,79.0 C 270.0,79.0 270.0,211.0 300,211.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core --owns--&gt; nodris_core::units</title></path>
+<path d="M 510,79.0 C 540.0,79.0 540.0,79.0 570,79.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core::math --owns--&gt; nodris_core::math::error</title></path>
+<path d="M 510,88.0 C 540.0,88.0 540.0,88.0 570,88.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math --uses--&gt; nodris_core::math::error</title></path>
+<path d="M 510,79.0 C 540.0,79.0 540.0,145.0 570,145.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core::math --owns--&gt; nodris_core::math::index</title></path>
+<path d="M 510,88.0 C 540.0,88.0 540.0,154.0 570,154.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math --uses--&gt; nodris_core::math::index</title></path>
+<path d="M 510,79.0 C 540.0,79.0 540.0,211.0 570,211.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core::math --owns--&gt; nodris_core::math::linalg</title></path>
+<path d="M 510,88.0 C 540.0,88.0 540.0,220.0 570,220.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math --uses--&gt; nodris_core::math::linalg</title></path>
+<path d="M 510,79.0 C 540.0,79.0 540.0,277.0 570,277.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core::math --owns--&gt; nodris_core::math::mat3</title></path>
+<path d="M 510,88.0 C 540.0,88.0 540.0,286.0 570,286.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math --uses--&gt; nodris_core::math::mat3</title></path>
+<path d="M 510,79.0 C 540.0,79.0 540.0,343.0 570,343.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core::math --owns--&gt; nodris_core::math::tolerance</title></path>
+<path d="M 510,79.0 C 540.0,79.0 540.0,409.0 570,409.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_core::math --owns--&gt; nodris_core::math::vec3</title></path>
+<path d="M 510,88.0 C 540.0,88.0 540.0,418.0 570,418.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math --uses--&gt; nodris_core::math::vec3</title></path>
+<path d="M 675.0,100 Q 540.0,159 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::error --uses--&gt; nodris_core::math</title></path>
+<path d="M 675.0,232 Q 540.0,258 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::linalg --uses--&gt; nodris_core::math</title></path>
+<path d="M 675.0,232 Q 675.0,270 675.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::linalg --uses--&gt; nodris_core::math::error</title></path>
+<path d="M 675.0,232 Q 675.0,282 675.0,175" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::linalg --uses--&gt; nodris_core::math::index</title></path>
+<path d="M 675.0,298 Q 540.0,324 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::mat3 --uses--&gt; nodris_core::math</title></path>
+<path d="M 675.0,298 Q 675.0,477 675.0,439" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::mat3 --uses--&gt; nodris_core::math::vec3</title></path>
+<path d="M 675.0,364 Q 540.0,414 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::tolerance --uses--&gt; nodris_core::math</title></path>
+<path d="M 675.0,430 Q 540.0,456 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::math::vec3 --uses--&gt; nodris_core::math</title></path>
+<path d="M 405.0,166 Q 405.0,204 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::model --uses--&gt; nodris_core::math</title></path>
+<path d="M 405.0,166 Q 405.0,291 405.0,241" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::model --uses--&gt; nodris_core::units</title></path>
+<path d="M 405.0,232 Q 405.0,258 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_core::units --uses--&gt; nodris_core::math</title></path>
+<rect x="30" y="58" width="210" height="42" rx="6" fill="#5397c8" stroke="#ffffff" stroke-width="1.5"/><text x="135.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">nodris_core</text>
+<rect x="300" y="58" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math</text>
+<rect x="570" y="58" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="675.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math::error</text>
+<rect x="570" y="124" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="675.0" y="149.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math::index</text>
+<rect x="570" y="190" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="675.0" y="215.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math::linalg</text>
+<rect x="570" y="256" width="210" height="42" rx="6" fill="#db5367" stroke="#ffffff" stroke-width="1.5"/><text x="675.0" y="281.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math::mat3</text>
+<rect x="570" y="322" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="675.0" y="347.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math::tolerance</text>
+<rect x="570" y="388" width="210" height="42" rx="6" fill="#db5367" stroke="#ffffff" stroke-width="1.5"/><text x="675.0" y="413.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">math::vec3</text>
+<rect x="300" y="124" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="149.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">model</text>
+<rect x="300" y="190" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="215.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">units</text>
+<text x="30" y="514" font-family="Segoe UI, sans-serif" font-size="12" fill="#4b5563">solid: owns  |  dashed: uses</text>
+</svg>
+</section><section><h2>nodris-io</h2><svg class="graph" xmlns="http://www.w3.org/2000/svg" width="540" height="260" viewBox="0 0 540 260">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="30" y="34" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600" fill="#1f2937">nodris_io module graph</text>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/>
+</marker>
+</defs>
+<path d="M 240,79.0 C 270.0,79.0 270.0,79.0 300,79.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_io --owns--&gt; nodris_io::interchange</title></path>
+<path d="M 240,88.0 C 270.0,88.0 270.0,88.0 300,88.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_io --uses--&gt; nodris_io::interchange</title></path>
+<path d="M 240,79.0 C 270.0,79.0 270.0,145.0 300,145.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_io --owns--&gt; nodris_io::model_json</title></path>
+<path d="M 405.0,100 Q 405.0,201 405.0,175" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_io::interchange --uses--&gt; nodris_io::model_json</title></path>
+<path d="M 405.0,166 Q 405.0,204 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_io::model_json --uses--&gt; nodris_io::interchange</title></path>
+<rect x="30" y="58" width="210" height="42" rx="6" fill="#5397c8" stroke="#ffffff" stroke-width="1.5"/><text x="135.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">nodris_io</text>
+<rect x="300" y="58" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">interchange</text>
+<rect x="300" y="124" width="210" height="42" rx="6" fill="#f8c04c" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="149.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">model_json</text>
+<text x="30" y="250" font-family="Segoe UI, sans-serif" font-size="12" fill="#4b5563">solid: owns  |  dashed: uses</text>
+</svg>
+</section></body></html>

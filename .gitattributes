@@ -1,0 +1,2 @@
+# The canonical JSON writer emits LF and the corpus test compares bytes.
+examples/*.json text eol=lf

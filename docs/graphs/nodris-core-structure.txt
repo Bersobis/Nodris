@@ -1,0 +1,62 @@
+
+[2m[0m[38;5;68mcrate[0m nodris_core
+[2m├── [0m[38;5;68mmod[0m math[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mtype[0m Real[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mmod[0m error[2m:[0m [38;5;107mpub[0m
+[2m│   │   └── [0m[38;5;68menum[0m SolveError[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mmod[0m index[2m:[0m [38;5;107mpub[0m
+[2m│   │   ├── [0m[38;5;68mstruct[0m NewIndex[2m:[0m [38;5;107mpub[0m
+[2m│   │   ├── [0m[38;5;68mstruct[0m OldIndex[2m:[0m [38;5;107mpub[0m
+[2m│   │   └── [0m[38;5;68mstruct[0m Permutation[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mmod[0m linalg[2m:[0m [38;5;107mpub[0m
+[2m│   │   ├── [0m[38;5;68mstruct[0m BandedMatrix[2m:[0m [38;5;107mpub[0m
+[2m│   │   └── [0m[38;5;68mstruct[0m Factored[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mmod[0m mat3[2m:[0m [38;5;167mpub(self)[0m
+[2m│   │   └── [0m[38;5;68mstruct[0m Mat3[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mmod[0m tolerance[2m:[0m [38;5;107mpub[0m
+[2m│   └── [0m[38;5;68mmod[0m vec3[2m:[0m [38;5;167mpub(self)[0m
+[2m│       └── [0m[38;5;68mstruct[0m Vec3[2m:[0m [38;5;107mpub[0m
+[2m├── [0m[38;5;68mmod[0m model[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Area[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m AreaId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m AreaKind[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m AreaLoad[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m BeamCoupling[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m BeamEnd[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Combination[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m CombinationId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m ElementKind[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m Load[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m LoadCase[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m LoadCaseId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Material[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m MaterialId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Member[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m MemberId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m MemberLoad[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Model[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m ModelError[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m ModelIndex[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m NodalLoad[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Node[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m NodeId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m ObjectKind[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m ObjectRef[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m PatchCoupling[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m PatchDirection[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m PatchEdge[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m PatchId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m PatchLoad[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m PatchTie[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m PatchTieId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Restraints[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Section[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m SectionId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68menum[0m Severity[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m SplinePatch[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m Support[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m SupportDefinition[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m SupportDefinitionId[2m:[0m [38;5;107mpub[0m
+[2m│   ├── [0m[38;5;68mstruct[0m TieConstraint[2m:[0m [38;5;107mpub[0m
+[2m│   └── [0m[38;5;68mstruct[0m ValidationIssue[2m:[0m [38;5;107mpub[0m
+[2m└── [0m[38;5;68mmod[0m units[2m:[0m [38;5;107mpub[0m

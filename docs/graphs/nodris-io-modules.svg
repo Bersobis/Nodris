@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="540" height="260" viewBox="0 0 540 260">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="30" y="34" font-family="Segoe UI, sans-serif" font-size="22" font-weight="600" fill="#1f2937">nodris_io module graph</text>
+<defs>
+<marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+<path d="M0,0 L7,3 L0,6 Z" fill="#6b7280"/>
+</marker>
+</defs>
+<path d="M 240,79.0 C 270.0,79.0 270.0,79.0 300,79.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_io --owns--&gt; nodris_io::interchange</title></path>
+<path d="M 240,88.0 C 270.0,88.0 270.0,88.0 300,88.0" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_io --uses--&gt; nodris_io::interchange</title></path>
+<path d="M 240,79.0 C 270.0,79.0 270.0,145.0 300,145.0" fill="none" stroke="#9ca3af" stroke-width="1.4" marker-end="url(#arrow)" data-kind="owns"><title>nodris_io --owns--&gt; nodris_io::model_json</title></path>
+<path d="M 405.0,100 Q 405.0,201 405.0,175" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_io::interchange --uses--&gt; nodris_io::model_json</title></path>
+<path d="M 405.0,166 Q 405.0,204 405.0,109" fill="none" stroke="#9ca3af" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arrow)" data-kind="uses"><title>nodris_io::model_json --uses--&gt; nodris_io::interchange</title></path>
+<rect x="30" y="58" width="210" height="42" rx="6" fill="#5397c8" stroke="#ffffff" stroke-width="1.5"/><text x="135.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">nodris_io</text>
+<rect x="300" y="58" width="210" height="42" rx="6" fill="#81c169" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="83.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">interchange</text>
+<rect x="300" y="124" width="210" height="42" rx="6" fill="#f8c04c" stroke="#ffffff" stroke-width="1.5"/><text x="405.0" y="149.0" text-anchor="middle" font-family="Consolas, monospace" font-size="12" fill="#111827">model_json</text>
+<text x="30" y="250" font-family="Segoe UI, sans-serif" font-size="12" fill="#4b5563">solid: owns  |  dashed: uses</text>
+</svg>
