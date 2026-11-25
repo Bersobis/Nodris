@@ -20,6 +20,7 @@ model yet.
 | `crates/nodris-core` | numerical kernel, model schema, elements, analysis |
 | `crates/nodris-io` | versioned model documents, strict and permissive import |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | layering, crate boundaries and the reasons for them |
+| [docs/NUMERICAL-KERNEL-ELEMENT-INTENT.md](docs/NUMERICAL-KERNEL-ELEMENT-INTENT.md) | degrees of freedom, local axes and sign conventions of an element |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | commit and review conventions |
 
 ## Building

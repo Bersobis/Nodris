@@ -7,6 +7,11 @@
 //! There are six degrees of freedom per node, always in this order:
 //! translation X, Y, Z, then rotation about X, Y, Z. [`node_dofs`] is the one
 //! place that turns a node index into those global numbers.
+//!
+//! The full contract, including the local-axis convention, the sign
+//! conventions for end forces and the meaning of a `None` geometric
+//! stiffness, is written down in
+//! [NUMERICAL-KERNEL-ELEMENT-INTENT.md](https://github.com/Bersobis/Nodris/blob/main/docs/NUMERICAL-KERNEL-ELEMENT-INTENT.md).
 
 use std::fmt;
 
