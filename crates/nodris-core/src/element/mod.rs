@@ -14,7 +14,7 @@ use crate::math::{Mat3, Real, Vec3};
 
 mod frame3d;
 
-pub use frame3d::local_frame_stiffness;
+pub use frame3d::{end_forces, local_axes, local_frame_stiffness, to_global, FrameElement};
 
 /// Invalid input to an element formulation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -23,6 +23,12 @@ pub enum ElementError {
     InvalidLength { length: Real },
     /// A rigidity must be finite and greater than zero.
     InvalidRigidity { name: &'static str, value: Real },
+    /// The two nodes do not define a direction.
+    DegenerateMember,
+    /// Poisson ratio makes the shear modulus unusable.
+    InvalidPoissonRatio { value: Real },
+    /// Density must be finite and not negative.
+    InvalidDensity { value: Real },
 }
 
 impl fmt::Display for ElementError {
@@ -39,6 +45,13 @@ impl fmt::Display for ElementError {
                     f,
                     "{name} must be finite and greater than zero, got {value}"
                 )
+            }
+            Self::DegenerateMember => write!(f, "member nodes do not define a direction"),
+            Self::InvalidPoissonRatio { value } => {
+                write!(f, "Poisson ratio {value} gives an unusable shear modulus")
+            }
+            Self::InvalidDensity { value } => {
+                write!(f, "density must be finite and not negative, got {value}")
             }
         }
     }
