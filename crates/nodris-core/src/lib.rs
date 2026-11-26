@@ -10,6 +10,8 @@
 //! cross into analysis units. [`model`] holds the entities those values
 //! describe, with stable ids. [`element`] is the formulation contract built
 //! on that model and maths, including the one six-DOF-per-node order.
+//! [`spline`] holds the B-spline spaces and patch geometry that the
+//! isogeometric elements build on.
 //!
 //! The solver's guarantees and limits are recorded in
 //! `docs/SOLVER-GUARANTEES.md` at the workspace root.
@@ -20,6 +22,7 @@
 pub mod element;
 pub mod math;
 pub mod model;
+pub mod spline;
 pub mod units;
 
 pub use element::{
@@ -38,3 +41,4 @@ pub use model::{
     SectionId, Severity, SplinePatch, Support, SupportDefinition, SupportDefinitionId,
     TieConstraint, ValidationIssue,
 };
+pub use spline::{BSplinePatch, BSplineSpace, PatchBasis, SplineError};
