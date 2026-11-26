@@ -22,30 +22,9 @@
 //!   positive 3 face in tension;
 //! * a pressure acts on the positive 3 face.
 
-use super::{Element, ElementError, InitialStress, DOF_PER_NODE};
+use super::{Element, ElementError, InitialStress, ShellForces, DOF_PER_NODE};
 use crate::math::{Mat3, Real, Vec3};
 use crate::model::Material;
-
-/// Internal force resultants at one point of a shell, per unit width.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ShellForces {
-    /// Membrane force in local 1, tension positive.
-    pub n11: Real,
-    /// Membrane force in local 2, tension positive.
-    pub n22: Real,
-    /// Membrane shear.
-    pub n12: Real,
-    /// Bending moment about local 2.
-    pub m11: Real,
-    /// Bending moment about local 1.
-    pub m22: Real,
-    /// Twisting moment.
-    pub m12: Real,
-    /// Transverse shear on the local 1 face.
-    pub v13: Real,
-    /// Transverse shear on the local 2 face.
-    pub v23: Real,
-}
 
 const GAUSS: [Real; 2] = [-0.577_350_269_189_625_7, 0.577_350_269_189_625_7];
 const SHELL_DOF: usize = 4 * DOF_PER_NODE;

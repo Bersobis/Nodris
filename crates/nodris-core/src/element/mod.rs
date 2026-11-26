@@ -25,7 +25,7 @@ mod truss3d;
 
 pub use frame3d::{end_forces, local_axes, local_frame_stiffness, to_global, FrameElement};
 pub use iga_patch::IgaPatchElement;
-pub use shell4::{ShellElement, ShellForces};
+pub use shell4::ShellElement;
 pub use truss3d::TrussElement;
 
 /// Invalid input to an element formulation.
@@ -135,6 +135,31 @@ impl InitialStress {
     pub fn is_zero(&self) -> bool {
         self.axial == 0.0 && self.nx == 0.0 && self.ny == 0.0 && self.nxy == 0.0
     }
+}
+
+/// Internal force resultants at one point of a shell or patch, per unit width.
+///
+/// The four-node shell and the isogeometric patch both report this type, so
+/// result post-processing does not depend on which area formulation produced
+/// the section forces.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ShellForces {
+    /// Membrane force in local 1, tension positive.
+    pub n11: Real,
+    /// Membrane force in local 2, tension positive.
+    pub n22: Real,
+    /// Membrane shear.
+    pub n12: Real,
+    /// Bending moment about local 2.
+    pub m11: Real,
+    /// Bending moment about local 1.
+    pub m22: Real,
+    /// Twisting moment.
+    pub m12: Real,
+    /// Transverse shear on the local 1 face.
+    pub v13: Real,
+    /// Transverse shear on the local 2 face.
+    pub v23: Real,
 }
 
 /// Number of degrees of freedom at every node.
