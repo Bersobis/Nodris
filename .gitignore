@@ -39,3 +39,4 @@ anti-slop/audit-003-2026-11-24.md
 anti-slop/audit-004-2026-11-24.md
 .gitignore
 .gitignore
+scripts/kb_index.py

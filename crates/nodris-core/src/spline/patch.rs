@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use super::nurbs::rationalise;
 use super::BSplineSpace;
 use crate::math::{Real, Vec3};
 use crate::model::PatchDirection;
@@ -34,6 +35,18 @@ pub enum SplineError {
         /// Requested degree.
         degree: usize,
     },
+    /// The weight count differs from the number of control points.
+    WeightCount {
+        /// Weights supplied.
+        count: usize,
+        /// Control points in the net.
+        expected: usize,
+    },
+    /// A weight is zero, negative or not finite.
+    InvalidWeight {
+        /// Flat control-point index, row-major.
+        index: usize,
+    },
 }
 
 impl fmt::Display for SplineError {
@@ -51,6 +64,12 @@ impl fmt::Display for SplineError {
                 "{} direction has {count} control points for degree {degree}",
                 direction.as_str()
             ),
+            Self::WeightCount { count, expected } => {
+                write!(f, "{count} weights for {expected} control points")
+            }
+            Self::InvalidWeight { index } => {
+                write!(f, "weight {index} is not finite and positive")
+            }
         }
     }
 }
@@ -63,6 +82,9 @@ pub struct BSplinePatch {
     u: BSplineSpace,
     v: BSplineSpace,
     control: Vec<Vec<Vec3>>,
+    /// One weight per control point, row-major, or `None` for a polynomial
+    /// patch.
+    weights: Option<Vec<Real>>,
 }
 
 impl BSplinePatch {
@@ -97,7 +119,34 @@ impl BSplinePatch {
             u: BSplineSpace::open_uniform(degree_u, control.len()),
             v: BSplineSpace::open_uniform(degree_v, columns),
             control: control.to_vec(),
+            weights: None,
         })
+    }
+
+    /// Builds a rational patch: the same clamped spaces and control net, with
+    /// one weight per control point.
+    ///
+    /// Weights are row-major like the net, `iu * n_v + iv`, and must be finite
+    /// and positive. A zero or negative weight would let the weighted sum
+    /// vanish inside the patch, and the rational point with it.
+    pub fn from_grid_weighted(
+        control: &[Vec<Vec3>],
+        weights: &[Real],
+        degree_u: usize,
+        degree_v: usize,
+    ) -> Result<Self, SplineError> {
+        let mut patch = Self::from_grid(control, degree_u, degree_v)?;
+        if weights.len() != patch.n_cp() {
+            return Err(SplineError::WeightCount {
+                count: weights.len(),
+                expected: patch.n_cp(),
+            });
+        }
+        if let Some(index) = weights.iter().position(|&w| !(w.is_finite() && w > 0.0)) {
+            return Err(SplineError::InvalidWeight { index });
+        }
+        patch.weights = Some(weights.to_vec());
+        Ok(patch)
     }
 
     /// Basis in the `u` direction.
@@ -136,6 +185,10 @@ impl BSplinePatch {
     }
 
     /// Basis values and first parametric derivatives at `(u, v)`.
+    ///
+    /// Rational when the patch carries weights, polynomial otherwise. The
+    /// rational form is `R_A = N_A w_A / W` with `W = Σ N_B w_B`, and its
+    /// derivative is the quotient rule applied to that ratio.
     pub fn basis(&self, u: Real, v: Real) -> PatchBasis {
         let n_u = self.n_u();
         let n_v = self.n_v();
@@ -158,6 +211,9 @@ impl BSplinePatch {
                 basis.du[index] = dnu * nv;
                 basis.dv[index] = nu * dnv;
             }
+        }
+        if let Some(weights) = &self.weights {
+            rationalise(&mut basis, weights);
         }
         basis
     }
