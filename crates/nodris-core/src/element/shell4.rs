@@ -549,7 +549,7 @@ fn shear_b(
 
 /// Plane-stress constitutive matrix, with the shear term in engineering
 /// strain. `rigidity` is `E·t` for membrane and `E·t³/12` for bending.
-fn plane_stress_matrix(rigidity: Real, poisson: Real) -> [[Real; 3]; 3] {
+pub(super) fn plane_stress_matrix(rigidity: Real, poisson: Real) -> [[Real; 3]; 3] {
     let factor = rigidity / (1.0 - poisson * poisson);
     [
         [factor, factor * poisson, 0.0],

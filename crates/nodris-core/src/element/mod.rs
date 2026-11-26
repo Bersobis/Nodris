@@ -19,10 +19,12 @@ use crate::math::{Mat3, Real, Vec3};
 use crate::model::Section;
 
 mod frame3d;
+mod iga_patch;
 mod shell4;
 mod truss3d;
 
 pub use frame3d::{end_forces, local_axes, local_frame_stiffness, to_global, FrameElement};
+pub use iga_patch::IgaPatchElement;
 pub use shell4::{ShellElement, ShellForces};
 pub use truss3d::TrussElement;
 
@@ -45,6 +47,13 @@ pub enum ElementError {
     DegenerateArea,
     /// The joints run clockwise or cross over.
     ClockwiseOrdering,
+    /// The node list does not cover every control point.
+    NodeCount {
+        /// Control points in the patch.
+        expected: usize,
+        /// Node indices supplied.
+        count: usize,
+    },
 }
 
 impl fmt::Display for ElementError {
@@ -78,6 +87,12 @@ impl fmt::Display for ElementError {
             Self::DegenerateArea => write!(f, "the joints do not define a plane"),
             Self::ClockwiseOrdering => {
                 write!(f, "the joints run clockwise or cross over")
+            }
+            Self::NodeCount { expected, count } => {
+                write!(
+                    f,
+                    "a patch has {expected} control points, {count} nodes were given"
+                )
             }
         }
     }

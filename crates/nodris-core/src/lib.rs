@@ -27,8 +27,8 @@ pub mod units;
 
 pub use element::{
     end_forces, local_axes, local_frame_stiffness, member_dofs, node_dofs, to_global, Element,
-    ElementError, FrameElement, InitialStress, ShellElement, ShellForces, TrussElement, DOF_NAMES,
-    DOF_PER_NODE,
+    ElementError, FrameElement, IgaPatchElement, InitialStress, ShellElement, ShellForces,
+    TrussElement, DOF_NAMES, DOF_PER_NODE,
 };
 pub use math::{
     renumber, BandedMatrix, Factored, Mat3, NewIndex, OldIndex, Permutation, SolveError, Vec3,
