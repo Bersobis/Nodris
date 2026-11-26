@@ -12,6 +12,10 @@
 //! curved patch therefore behaves as its flat projection, the same
 //! approximation the four-node shell makes for a warped quad.
 //!
+//! The initial-stress matrix integrates the transverse slopes against the
+//! membrane resultants on the same basis, so compression softens the
+//! transverse field and can produce a buckling load.
+//!
 //! Local DOF order at each control point is `[u, v, w, θx, θy, θz]`, the order
 //! shell4 uses, so ties, loads and result post-processing can be shared. The
 //! drilling rotation `θz` carries no stiffness.
@@ -24,7 +28,7 @@ use super::shell4::plane_stress_matrix;
 use super::{Element, ElementError, InitialStress, ShellForces, DOF_PER_NODE};
 use crate::math::{Mat3, Real, Vec3};
 use crate::model::Material;
-use crate::spline::BSplinePatch;
+use crate::spline::{BSplinePatch, BSplineSpace};
 
 /// A tensor-product patch carrying membrane, bending and shear stiffness.
 #[derive(Clone, Debug)]
@@ -99,48 +103,43 @@ impl IgaPatchElement {
 
         let size = n_cp * DOF_PER_NODE;
         let mut k_local = vec![0.0; size * size];
-        let (nodes_u, weights_u) = gauss_rule(patch.space_u().degree() + 1);
-        let (nodes_v, weights_v) = gauss_rule(patch.space_v().degree() + 1);
-        // The rule is written on [-1, 1]; the patch parameter runs over
-        // [u0, u1] × [v0, v1], so each node and weight is scaled onto it.
-        let scale = 0.5 * (u1 - u0) * 0.5 * (v1 - v0);
         let mut area = 0.0;
         // Lumped mass share of each control point: `∫ N_A dA`. The shares sum
         // to the area because the basis partitions to one. They are equal only
         // when every basis function integrates alike, which is the case over a
         // single span but not across an interior knot.
         let mut lumped = vec![0.0; n_cp];
-        for (iu, &node_u) in nodes_u.iter().enumerate() {
-            for (iv, &node_v) in nodes_v.iter().enumerate() {
-                let u = 0.5 * ((u1 - u0) * node_u + u0 + u1);
-                let v = 0.5 * ((v1 - v0) * node_v + v0 + v1);
-                let mapping = mapping(&patch, &x, &y, u, v);
-                if !mapping.det.is_finite() || mapping.det <= 0.0 {
-                    return Err(ElementError::DegenerateArea);
-                }
-                let weight = weights_u[iu] * weights_v[iv] * mapping.det * scale;
-                area += weight;
-                for (control_point, &value) in mapping.value.iter().enumerate() {
-                    lumped[control_point] += value * weight;
-                }
-                add_btb(&mut k_local, &membrane_b(&mapping), &dm, weight, size);
-                add_btb(&mut k_local, &bending_b(&mapping), &db, weight, size);
+        let full = quadrature(
+            &patch,
+            patch.space_u().degree() + 1,
+            patch.space_v().degree() + 1,
+        );
+        for &(u, v, parametric_weight) in &full {
+            let mapping = mapping(&patch, &x, &y, u, v);
+            if !mapping.det.is_finite() || mapping.det <= 0.0 {
+                return Err(ElementError::DegenerateArea);
             }
+            let weight = parametric_weight * mapping.det;
+            area += weight;
+            for (control_point, &value) in mapping.value.iter().enumerate() {
+                lumped[control_point] += value * weight;
+            }
+            add_membrane(&mut k_local, &mapping, &dm, weight, size);
+            add_bending(&mut k_local, &mapping, &db, weight, size);
         }
 
         // One order less for shear: the transverse shear field is lower degree
         // than the bending field, and integrating it fully over-stiffens a
         // thin patch.
-        let (shear_u, shear_weights_u) = gauss_rule(patch.space_u().degree().max(1));
-        let (shear_v, shear_weights_v) = gauss_rule(patch.space_v().degree().max(1));
-        for (iu, &node_u) in shear_u.iter().enumerate() {
-            for (iv, &node_v) in shear_v.iter().enumerate() {
-                let u = 0.5 * ((u1 - u0) * node_u + u0 + u1);
-                let v = 0.5 * ((v1 - v0) * node_v + v0 + v1);
-                let mapping = mapping(&patch, &x, &y, u, v);
-                let weight = shear_weights_u[iu] * shear_weights_v[iv] * mapping.det * scale;
-                add_shear(&mut k_local, &shear_b(&mapping), ds, weight, size);
-            }
+        let shear = quadrature(
+            &patch,
+            patch.space_u().degree().max(1),
+            patch.space_v().degree().max(1),
+        );
+        for &(u, v, parametric_weight) in &shear {
+            let mapping = mapping(&patch, &x, &y, u, v);
+            let weight = parametric_weight * mapping.det;
+            add_shear(&mut k_local, &mapping, ds, weight, size);
         }
 
         let k_global = transform_to_global(&axes, &k_local, size);
@@ -194,6 +193,42 @@ impl IgaPatchElement {
     /// The local matrix, kept for post-processing.
     pub fn local_stiffness(&self) -> &[Real] {
         &self.k_local
+    }
+
+    /// Initial-stress matrix from the membrane resultants [kN/m], tension
+    /// positive.
+    ///
+    /// The transverse slopes are integrated against `nx`, `ny` and `nxy` with
+    /// the full rule, as the elastic stiffness is. Only `w` carries the term,
+    /// so a constant `w` produces no geometric force.
+    pub fn geometric_stiffness_matrix(&self, stress: InitialStress) -> Vec<Real> {
+        let size = self.dofs.len();
+        let mut local = vec![0.0; size * size];
+        if stress.nx == 0.0 && stress.ny == 0.0 && stress.nxy == 0.0 {
+            return local;
+        }
+        let n_cp = self.patch.n_cp();
+        let full = quadrature(
+            &self.patch,
+            self.patch.space_u().degree() + 1,
+            self.patch.space_v().degree() + 1,
+        );
+        for &(u, v, parametric_weight) in &full {
+            let mapping = mapping(&self.patch, &self.x, &self.y, u, v);
+            let weight = parametric_weight * mapping.det;
+            for row in 0..n_cp {
+                let row_dof = row * DOF_PER_NODE + 2;
+                for column in 0..n_cp {
+                    let slope = stress.nx * mapping.dx[row] * mapping.dx[column]
+                        + stress.ny * mapping.dy[row] * mapping.dy[column]
+                        + stress.nxy
+                            * (mapping.dx[row] * mapping.dy[column]
+                                + mapping.dy[row] * mapping.dx[column]);
+                    local[row_dof * size + column * DOF_PER_NODE + 2] += slope * weight;
+                }
+            }
+        }
+        transform_to_global(&self.axes, &local, size)
     }
 
     /// Internal force resultants at the parametric point `(u, v)`.
@@ -254,22 +289,19 @@ impl IgaPatchElement {
     /// Work-equivalent control-point loads of a uniform local pressure.
     fn consistent_load(&self, q: Vec3) -> Vec<Real> {
         let mut local = vec![0.0; self.dofs.len()];
-        let ((u0, u1), (v0, v1)) = self.patch.domain();
-        let scale = 0.5 * (u1 - u0) * 0.5 * (v1 - v0);
-        let (nodes_u, weights_u) = gauss_rule(self.patch.space_u().degree() + 1);
-        let (nodes_v, weights_v) = gauss_rule(self.patch.space_v().degree() + 1);
-        for (iu, &node_u) in nodes_u.iter().enumerate() {
-            for (iv, &node_v) in nodes_v.iter().enumerate() {
-                let u = 0.5 * ((u1 - u0) * node_u + u0 + u1);
-                let v = 0.5 * ((v1 - v0) * node_v + v0 + v1);
-                let mapping = mapping(&self.patch, &self.x, &self.y, u, v);
-                let weight = weights_u[iu] * weights_v[iv] * mapping.det * scale;
-                for (control_point, &value) in mapping.value.iter().enumerate() {
-                    let dof = control_point * DOF_PER_NODE;
-                    local[dof] += q.x * value * weight;
-                    local[dof + 1] += q.y * value * weight;
-                    local[dof + 2] += q.z * value * weight;
-                }
+        let full = quadrature(
+            &self.patch,
+            self.patch.space_u().degree() + 1,
+            self.patch.space_v().degree() + 1,
+        );
+        for &(u, v, parametric_weight) in &full {
+            let mapping = mapping(&self.patch, &self.x, &self.y, u, v);
+            let weight = parametric_weight * mapping.det;
+            for (control_point, &value) in mapping.value.iter().enumerate() {
+                let dof = control_point * DOF_PER_NODE;
+                local[dof] += q.x * value * weight;
+                local[dof + 1] += q.y * value * weight;
+                local[dof + 2] += q.z * value * weight;
             }
         }
         self.to_global(&local)
@@ -315,8 +347,8 @@ impl Element for IgaPatchElement {
         &self.mass
     }
 
-    fn geometric_stiffness(&self, _stress: InitialStress) -> Option<Vec<Real>> {
-        None
+    fn geometric_stiffness(&self, stress: InitialStress) -> Option<Vec<Real>> {
+        Some(self.geometric_stiffness_matrix(stress))
     }
 }
 
@@ -433,25 +465,80 @@ fn shear_b(mapping: &Mapping) -> [Vec<Real>; 2] {
     b
 }
 
-fn add_btb(k: &mut [Real], b: &[Vec<Real>; 3], d: &[[Real; 3]; 3], weight: Real, size: usize) {
-    for row in 0..size {
-        for column in 0..size {
-            let mut value = 0.0;
-            for a in 0..3 {
-                for c in 0..3 {
-                    value += b[a][row] * d[a][c] * b[c][column];
-                }
-            }
-            k[row * size + column] += value * weight;
+/// `aᵀ D b` for the three strain components of one control-point pair.
+fn bilinear(d: &[[Real; 3]; 3], a: [Real; 3], b: [Real; 3]) -> Real {
+    let mut sum = 0.0;
+    for row in 0..3 {
+        for column in 0..3 {
+            sum += a[row] * d[row][column] * b[column];
+        }
+    }
+    sum
+}
+
+/// Adds `Bᵀ D B` by control-point pairs. Membrane rows touch only `u` and
+/// `v`, so the six-by-six block per pair comes from four three-vectors.
+fn add_membrane(k: &mut [Real], mapping: &Mapping, d: &[[Real; 3]; 3], weight: Real, size: usize) {
+    let n = mapping.dx.len();
+    for a in 0..n {
+        let bu_a = [mapping.dx[a], 0.0, mapping.dy[a]];
+        let bv_a = [0.0, mapping.dy[a], mapping.dx[a]];
+        for b in 0..n {
+            let bu_b = [mapping.dx[b], 0.0, mapping.dy[b]];
+            let bv_b = [0.0, mapping.dy[b], mapping.dx[b]];
+            let row = a * DOF_PER_NODE;
+            let column = b * DOF_PER_NODE;
+            k[row * size + column] += weight * bilinear(d, bu_a, bu_b);
+            k[row * size + column + 1] += weight * bilinear(d, bu_a, bv_b);
+            k[(row + 1) * size + column] += weight * bilinear(d, bv_a, bu_b);
+            k[(row + 1) * size + column + 1] += weight * bilinear(d, bv_a, bv_b);
         }
     }
 }
 
-fn add_shear(k: &mut [Real], b: &[Vec<Real>; 2], ds: Real, weight: Real, size: usize) {
-    for row in 0..size {
-        for column in 0..size {
-            let value = ds * (b[0][row] * b[0][column] + b[1][row] * b[1][column]);
-            k[row * size + column] += value * weight;
+/// Adds the bending block. Curvature rows touch only `θx` and `θy`.
+fn add_bending(k: &mut [Real], mapping: &Mapping, d: &[[Real; 3]; 3], weight: Real, size: usize) {
+    let n = mapping.dx.len();
+    for a in 0..n {
+        let rx_a = [0.0, mapping.dy[a], mapping.dx[a]];
+        let ry_a = [-mapping.dx[a], 0.0, -mapping.dy[a]];
+        for b in 0..n {
+            let rx_b = [0.0, mapping.dy[b], mapping.dx[b]];
+            let ry_b = [-mapping.dx[b], 0.0, -mapping.dy[b]];
+            let row = a * DOF_PER_NODE + 3;
+            let column = b * DOF_PER_NODE + 3;
+            k[row * size + column] += weight * bilinear(d, rx_a, rx_b);
+            k[row * size + column + 1] += weight * bilinear(d, rx_a, ry_b);
+            k[(row + 1) * size + column] += weight * bilinear(d, ry_a, rx_b);
+            k[(row + 1) * size + column + 1] += weight * bilinear(d, ry_a, ry_b);
+        }
+    }
+}
+
+/// Adds the shear block. The two strain rows touch `w`, `θx` and `θy`.
+fn add_shear(k: &mut [Real], mapping: &Mapping, ds: Real, weight: Real, size: usize) {
+    let n = mapping.dx.len();
+    let components = [2usize, 3, 4];
+    for a in 0..n {
+        let rows_a = [
+            [mapping.dx[a], mapping.dy[a]],
+            [0.0, -mapping.value[a]],
+            [mapping.value[a], 0.0],
+        ];
+        for b in 0..n {
+            let rows_b = [
+                [mapping.dx[b], mapping.dy[b]],
+                [0.0, -mapping.value[b]],
+                [mapping.value[b], 0.0],
+            ];
+            for (p, &row_component) in components.iter().enumerate() {
+                for (q, &column_component) in components.iter().enumerate() {
+                    let dot = rows_a[p][0] * rows_b[q][0] + rows_a[p][1] * rows_b[q][1];
+                    k[(a * DOF_PER_NODE + row_component) * size
+                        + b * DOF_PER_NODE
+                        + column_component] += ds * weight * dot;
+                }
+            }
         }
     }
 }
@@ -499,6 +586,51 @@ fn mat_vec(m: &[[Real; 3]; 3], v: &[Real; 3]) -> [Real; 3] {
 
 fn dot_row(row: &[Real], d: &[Real]) -> Real {
     row.iter().zip(d).map(|(a, b)| a * b).sum()
+}
+
+/// Non-empty knot spans of one direction, as `[start, end]` pairs.
+fn knot_spans(space: &BSplineSpace) -> Vec<(Real, Real)> {
+    let knots = space.knots();
+    let degree = space.degree();
+    let mut spans = Vec::new();
+    let mut start = knots[degree];
+    for &end in &knots[degree + 1..=space.n()] {
+        if end > start {
+            spans.push((start, end));
+            start = end;
+        }
+    }
+    spans
+}
+
+/// Gauss points over every knot span, with the parametric weight of each.
+///
+/// A patch with interior knots is integrated span by span: a single rule over
+/// the whole domain would miss the basis functions whose support does not
+/// reach those few points.
+fn quadrature(patch: &BSplinePatch, points_u: usize, points_v: usize) -> Vec<(Real, Real, Real)> {
+    let (nodes_u, weights_u) = gauss_rule(points_u);
+    let (nodes_v, weights_v) = gauss_rule(points_v);
+    let spans_u = knot_spans(patch.space_u());
+    let spans_v = knot_spans(patch.space_v());
+    let mut points =
+        Vec::with_capacity(spans_u.len() * spans_v.len() * nodes_u.len() * nodes_v.len());
+    for &(u0, u1) in &spans_u {
+        for &(v0, v1) in &spans_v {
+            let scale_u = 0.5 * (u1 - u0);
+            let scale_v = 0.5 * (v1 - v0);
+            for (iu, &node_u) in nodes_u.iter().enumerate() {
+                for (iv, &node_v) in nodes_v.iter().enumerate() {
+                    points.push((
+                        0.5 * ((u1 - u0) * node_u + u0 + u1),
+                        0.5 * ((v1 - v0) * node_v + v0 + v1),
+                        weights_u[iu] * weights_v[iv] * scale_u * scale_v,
+                    ));
+                }
+            }
+        }
+    }
+    points
 }
 
 /// Gauss–Legendre nodes and weights on `[-1, 1]`.
